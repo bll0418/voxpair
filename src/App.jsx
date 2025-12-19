@@ -1,6 +1,10 @@
 import React, {useState, useEffect, useRef} from 'react';
 import Peer from 'peerjs';
 
+// 然后使用
+const myAvatar = '/assets/1.jpg';
+const theirAvatar = '/assets/2.jpg';
+
 const languages = {
     zh: '中文',
     en: 'English',
@@ -21,8 +25,6 @@ const inputMessagePlaceholder = {
 };
 
 // 固定头像（你可以换成自己喜欢的 URL）
-const myAvatar = '/src/assets/1.jpg';     // 你（自己消息用这个）
-const theirAvatar = '/src/assets/2.jpg';    // 对方（对方消息用这个）
 
 const generateUsername = () => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -216,12 +218,12 @@ function App() {
                 <span className="text-sm text-gray-600 mr-3">分享给对方连接</span>
                 <input
                     type="text"
-                    value={`http://localhost:5173?peerId=${myId}`}
+                    value={`${import.meta.env.VITE_APP_BASE_URL}?peerId=${myId}`}
                     readOnly
                     className="border border-gray-300 rounded px-3 py-1 text-sm bg-gray-50"
                 />
                 <button
-                    onClick={() => navigator.clipboard.writeText(`http://localhost:5173?peerId=${myId}`)}
+                    onClick={() => navigator.clipboard.writeText(`${import.meta.env.VITE_APP_BASE_URL}?peerId=${myId}`)}
                     className="ml-2 bg-blue-500 text-white px-3 py-1 rounded text-sm"
                 >
                     复制
