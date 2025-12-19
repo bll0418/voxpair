@@ -4,7 +4,6 @@ import Peer from 'peerjs';
 const languages = {
     zh: '中文',
     en: 'English',
-    es: 'Español',
     fr: 'Français',
     de: 'Deutsch',
     ja: '日本語',
@@ -12,15 +11,18 @@ const languages = {
 const originalMessageTip = {
     zh: '原文',
     en: 'original',
-    es: 'Español',
     fr: 'Français',
     de: 'Deutsch',
     ja: '日本語',
 };
 
 const inputMessagePlaceholder = {
-    zh: '输入消息...', en: 'Input message..', es: 'Español', fr: 'Français', de: 'Deutsch', ja: '日本語',
+    zh: '输入消息...', en: 'Input message..',   fr: 'Français', de: 'Deutsch', ja: '日本語',
 };
+
+// 固定头像（你可以换成自己喜欢的 URL）
+const myAvatar = '/src/assets/1.jpg';     // 你（自己消息用这个）
+const theirAvatar = '/src/assets/2.jpg';    // 对方（对方消息用这个）
 
 const generateUsername = () => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -29,6 +31,19 @@ const generateUsername = () => {
         result += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     return result;
+};
+
+const translate = async (text, sourceLang, targetLang) => {
+    if (sourceLang === targetLang || !text.trim()) return text;
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
+    try {
+        const res = await fetch(url);
+        const data = await res.json();
+        return data[0].map(segment => segment[0]).join('');
+    } catch (e) {
+        console.error("翻译失败：" + e);
+        return text + ' (翻译失败)';
+    }
 };
 
 function App() {
@@ -43,40 +58,15 @@ function App() {
     const connRef = useRef(null);
     const messagesEndRef = useRef(null);
 
-    // 固定头像（你可以换成自己喜欢的 URL）
-    const myAvatar = 'https://randomuser.me/api/portraits/women/1.jpg';     // 你（自己消息用这个）
-    const theirAvatar = 'https://randomuser.me/api/portraits/men/1.jpg';    // 对方（对方消息用这个）
-
-    useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({behavior: 'smooth'});
-    }, [messages]);
-
-    useEffect(() => {
-        const shortId = generateUsername();
-        const peer = new Peer(shortId);
-        peerRef.current = peer;
-
-        peer.on('open', (id) => setMyId(id));
-
-        peer.on('connection', (conn) => {
-            connRef.current = conn;
-            setConnected(true);
-            setupConn(conn);
-        });
-
-        return () => peer.destroy();
-    }, []);
 
     const setupConn = (conn) => {
-
-        // 发送自己的语言和 ID
-        conn.send({type: 'init', lang: myLang, id: myId});
-
+        // conn.send({type: 'init', lang: myLang, id: myId});
 
         conn.on('data', async (data) => {
             if (data.type === 'init') {
                 setTheirLang(data.lang);
                 setRemoteId(data.id);  // 保存对方的 ID
+                console.log('对方ID已设置为:', data.id); // 添加日志确认ID设置
             } else if (data.type === 'lang') {
                 setTheirLang(data.lang);
             } else if (data.type === 'msg') {
@@ -88,29 +78,116 @@ function App() {
         });
     };
 
-    const connect = () => {
-        const conn = peerRef.current.connect(remoteId);
-        connRef.current = conn;
-        conn.on('open', () => {
-            setConnected(true);
-            // 发送初始化信息包括语言和自己的 ID
-            conn.send({type: 'init', lang: myLang, id: myId});
-            setupConn(conn);
-        });
-    };
+// 将 connect 函数改为异步函数，便于在 useEffect 中调用
+    const connect = async () => {
+        console.log('正在尝试连接...,remoteId:' + remoteId );
+        if (!remoteId.trim()) return;
 
-
-    const translate = async (text, sourceLang, targetLang) => {
-        if (sourceLang === targetLang || !text.trim()) return text;
-        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
         try {
-            const res = await fetch(url);
-            const data = await res.json();
-            return data[0].map(segment => segment[0]).join('');
-        } catch (e) {
-            return text + ' (翻译失败)';
+            console.log('正在尝试连接...');
+            const conn = peerRef.current.connect(remoteId);
+            connRef.current = conn;
+
+            // 监听连接打开事件
+            conn.on('open', () => {
+                console.log('已连接！');
+                setConnected(true);
+                // 连接成功后发送初始化信息
+                conn.send({type: 'init', lang: myLang, id: myId});
+                setupConn(conn);
+            });
+
+            // 监听连接错误
+            conn.on('error', (err) => {
+                console.error('连接失败:', err);
+            });
+        } catch (error) {
+            console.error('连接过程中发生错误:', error);
         }
     };
+
+    // 创建一个新的函数来处理连接，接收peerId作为参数
+    const connectWithPeerId = (remoteId, myId) => {
+        console.log('正在尝试连接:' + remoteId);
+        if (!remoteId.trim()) return;
+
+        try {
+            const conn = peerRef.current.connect(remoteId);
+            connRef.current = conn;
+            console.log('已连接！');
+
+            // 监听连接打开事件
+            conn.on('open', () => {
+                setConnected(true);
+                // 连接成功后发送初始化信息
+                console.log('连接成功后发送我的信息:' + myId);
+                conn.send({type: 'init', lang: myLang, id: myId});
+                setupConn(conn);
+            });
+
+            // 监听连接错误
+            conn.on('error', (err) => {
+                console.error('连接失败:', err);
+            });
+        } catch (error) {
+            console.error('连接过程中发生错误:', error);
+        }
+    };
+
+
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({behavior: 'smooth'});
+    }, [messages]);
+
+
+    useEffect(() => {
+        const shortId = generateUsername();
+        try {
+            const peer = new Peer(shortId);
+            // const peer = new Peer(shortId, {
+            //     host: 'localhost', // 替换为你的服务器域名
+            //     port: 9000,
+            //     path: '/peerjs' // 与服务器配置一致
+            // });
+            peerRef.current = peer;
+
+            peer.on('open', (id) => {
+                console.log('生成我的id:', id);
+                setMyId(id);
+
+                const urlParams = new URLSearchParams(window.location.search);
+                const peerId = urlParams.get('peerId');
+                if (peerId) {
+                    console.log('通过url获取对方的id:', peerId)
+                    setRemoteId(peerId);
+                    // 直接使用peerId而不是remoteId状态变量，因为状态更新是异步的
+                    connectWithPeerId(peerId, id);
+                }
+            });
+
+            peer.on('connection', (conn) => {
+                connRef.current = conn;
+                setConnected(true);
+                // 当有其他客户端连接我们时，我们也需要发送初始化信息
+                conn.send({type: 'init', lang: myLang, id: myId});
+
+
+                setupConn(conn);
+            });
+
+            peer.on('error', (err) => {
+                console.error('Peer.js 错误:', err);
+            });
+        } catch (error) {
+            console.error('Peer.js 初始化失败:', error);
+        }
+
+        return () => {
+            if (peerRef.current) {
+                peerRef.current.destroy();
+            }
+        };
+    }, []);
 
     const send = async () => {
         if (!message.trim() || !connRef.current) return;
@@ -134,8 +211,22 @@ function App() {
             <h1 className="text-4xl font-bold text-center mb-8">TransChat-跨语言实时聊天</h1>
             <p className="text-center mb-6 text-lg">
                 <strong className="text-green-600 text-4xl font-bold text-center mb-8">{myId || '加载中...'}</strong><br/>
-                <span className="text-sm text-gray-600">分享给对方连接</span>
             </p>
+            <div className="mt-2 flex items-center justify-center mb-5">
+                <span className="text-sm text-gray-600 mr-3">分享给对方连接</span>
+                <input
+                    type="text"
+                    value={`http://localhost:5173?peerId=${myId}`}
+                    readOnly
+                    className="border border-gray-300 rounded px-3 py-1 text-sm bg-gray-50"
+                />
+                <button
+                    onClick={() => navigator.clipboard.writeText(`http://localhost:5173?peerId=${myId}`)}
+                    className="ml-2 bg-blue-500 text-white px-3 py-1 rounded text-sm"
+                >
+                    复制
+                </button>
+            </div>
 
             <input
                 className="w-full border-2 border-gray-300 rounded-xl px-5 py-4 mb-8 text-lg"
@@ -155,12 +246,7 @@ function App() {
                         <option key={code} value={code}>{name}</option>
                     ))}
                 </select>
-                {/* 自定义下拉箭头 */}
-                <div className="absolute right-4 top-1/2 transform -translate-y-1/2 pointer-events-none">
-                    <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                </div>
+
             </div>
 
 
@@ -179,7 +265,7 @@ function App() {
                 {messages.map((msg, i) => (
                     <div key={i} className={`flex mb-4 ${msg.isMine ? 'justify-end' : 'justify-start'}`}>
                         {!msg.isMine &&
-                            <img src={theirAvatar} alt="对方" className="w-8 h-8 rounded-full mr-2 self-end"/>}
+                            <img src={theirAvatar} alt="对方" className="w-10 h-10 rounded-full mr-2 self-end"/>}
 
                         <div
                             className={`px-4 py-3 rounded-lg max-w-xs ${msg.isMine ? 'bg-green-500 text-white' : 'bg-white text-black shadow-sm'} border`}>
@@ -193,7 +279,7 @@ function App() {
 
                         </div>
 
-                        {msg.isMine && <img src={myAvatar} alt="我" className="w-8 h-8 rounded-full ml-2 self-end"/>}
+                        {msg.isMine && <img src={myAvatar} alt="我" className="w-10 h-10 rounded-full ml-2 self-end"/>}
                     </div>))}
 
                 <div ref={messagesEndRef}/>
