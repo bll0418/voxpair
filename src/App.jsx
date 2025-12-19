@@ -59,6 +59,18 @@ function App() {
     const peerRef = useRef(null);
     const connRef = useRef(null);
     const messagesEndRef = useRef(null);
+    const [isCopied, setIsCopied] = useState(false);
+
+    const copyId = async () => {
+        if (!myId) return;
+        try {
+            await navigator.clipboard.writeText(`${import.meta.env.VITE_APP_BASE_URL}?Id=${myId}`);
+            setIsCopied(true);
+            setTimeout(() => setIsCopied(false), 2000); // 2秒后恢复
+        } catch (e) {
+            console.log('复制失败');
+        }
+    };
 
 
     const setupConn = (conn) => {
@@ -158,7 +170,7 @@ function App() {
                 setMyId(id);
 
                 const urlParams = new URLSearchParams(window.location.search);
-                const peerId = urlParams.get('peerId');
+                const peerId = urlParams.get('Id');
                 if (peerId) {
                     console.log('通过url获取对方的id:', peerId)
                     setRemoteId(peerId);
@@ -215,19 +227,35 @@ function App() {
                 <strong className="text-green-600 text-4xl font-bold text-center mb-8">{myId || '加载中...'}</strong><br/>
             </p>
             <div className="mt-2 flex items-center justify-center mb-5">
-                <span className="text-sm text-gray-600 mr-3">分享给对方连接</span>
+                <span className="text-sm text-gray-600 mr-3">分享链接</span>
                 <input
                     type="text"
-                    value={`${import.meta.env.VITE_APP_BASE_URL}?peerId=${myId}`}
+                    value={`${import.meta.env.VITE_APP_BASE_URL}?Id=${myId}`}
                     readOnly
                     className="border border-gray-300 rounded px-3 py-1 text-sm bg-gray-50"
                 />
-                <button
-                    onClick={() => navigator.clipboard.writeText(`${import.meta.env.VITE_APP_BASE_URL}?peerId=${myId}`)}
-                    className="ml-2 bg-blue-500 text-white px-3 py-1 rounded text-sm"
-                >
-                    复制
+
+                <button onClick={copyId}  className="ml-2 bg-green-500 text-white pl-1 pr-3 py-1 rounded text-sm flex items-center" >
+                    {!isCopied && (
+                        <>
+                            <svg className="w-7 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h10a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            </svg>
+                            <span>复制</span>
+                        </>
+                    )}
+                    {isCopied && (
+                        <>
+                            <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                            <span>已复制</span>
+                        </>
+                    )}
                 </button>
+
+
+
             </div>
 
             <input
