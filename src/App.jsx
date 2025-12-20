@@ -24,9 +24,9 @@ const originalMessageTip = {
 const inputMessagePlaceholder = {
     zh: '输入消息...',
     en: 'Input message..',
-    fr: 'Français',
-    de: 'Deutsch',
-    ja: '日本語',
+    fr: 'Saisissez votre message...',
+    de: 'Geben Sie Ihre Nachricht ein...',
+    ja: 'メッセージを入力してください...',
 };
 
 //用户id:4位字母 + 3位数字
@@ -101,9 +101,8 @@ function ChatRoom() {
     const peerId = useRef( null);
 
     useEffect(() => {
-        console.log('URL 参数:', { urlId, urlLang });
+        console.log('通过链接打开,获取对方的id:', urlId + ',我的语言:' + urlLang)
         if (urlId && urlLang) {
-            console.log('通过链接打开,获取对方的id:', urlId + ',我的语言:' + urlLang)
             peerId.current = urlId;
             myLangRef.current = urlLang;
             setMyLang(myLangRef.current);
@@ -138,10 +137,16 @@ function ChatRoom() {
 
 
 
-    const changeMyLang = async (lang) => {
-        setMyLang(lang);
-        myLangRef.current = lang
-        console.log('change我的语言：' + lang);
+    const changeMyLang = async (newLang) => {
+        setMyLang(newLang);
+        myLangRef.current = newLang
+        console.log('change我的语言：' + newLang);
+        if (connRef.current && connected) {
+            connRef.current.send({
+                type: 'lang',
+                lang: newLang
+            });
+        }
     };
 
     const setupConn = (conn) => {
@@ -176,7 +181,7 @@ function ChatRoom() {
             const conn = peerRef.current.connect(remoteId);
             connRef.current = conn;
 
-            console.log('已连接:' + myId + ",lang:" + myLang);
+            console.log('已连接');
 
             // 监听连接打开事件
             conn.on('open', () => {
@@ -203,7 +208,6 @@ function ChatRoom() {
         const shortId = generateUsername();
         try {
             const peer = new Peer(shortId);
-
             peerRef.current = peer;
 
             peer.on('open', (id) => {
@@ -213,16 +217,10 @@ function ChatRoom() {
 
                 console.log("是否链接打开：" + linkOpen.current);
                 if (linkOpen.current) {
-                    const linkParams = new URLSearchParams(window.location.search);
-                    const langParam = linkParams.get('lang');
-                    console.log('通过链接打开时,设置对方的id:', peerId.current + ',和我的语言:' + langParam);
-                    // 只在没有默认值时才设置
-                    if (!myLang && langParam) {
-                        setMyLang(langParam);
-                    }
+                    console.log('通过链接打开时,设置对方的id:', peerId.current + ',和我的语言:' + urlLang);
                     setRemoteId(peerId.current);
                     // 直接使用peerId而不是remoteId状态变量，因为状态更新是异步的
-                    connectWithPeerId(peerId.current, linkParams.get('lang'));
+                    connectWithPeerId(peerId.current, urlLang);
                 }else {
                     console.log('我的语言：' + myLang);
                 }
@@ -338,9 +336,34 @@ function ChatRoom() {
             </div>
 
         </div>) : (<div className="max-w-2xl w-full mx-auto flex flex-col h-screen bg-gray-100">
-            <div className="bg-gray-50 px-4 py-3 text-center  ">
-                <h2 className="text-lg font-semibold">{remoteId}</h2>
+
+
+            {/* 顶部栏 - 右上角语言下拉框 */}
+            <div className="bg-gray-50 px-4 py-3 text-center  border-b border-gray-200  flex items-center justify-between shadow-sm">
+
+                {/*<h2 className="text-lg font-semibold " >{remoteId}</h2>*/}
+                <h2 className="text-xl font-bold text-black pl-1.5">{remoteId}</h2>
+
+                {/* 语言下拉框（右上角） */}
+                <div className="relative">
+                    <select
+                        value={myLang}
+                        onChange={(e) => changeMyLang(e.target.value)}
+                        className="appearance-none bg-transparent border-2 border-gray-100 rounded-lg px-4 py-2 pr-10 text-lg font-medium focus:outline-none focus:border-gray-200 cursor-pointer">
+                        {Object.entries(languages).map(([code, name]) => (
+                            <option key={code} value={code}>{name}</option>
+                        ))}
+                    </select>
+
+                    {/* 下拉箭头图标 */}
+                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                        <svg className="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </div>
+                </div>
             </div>
+
 
             <div className="flex-1 overflow-y-auto px-4 py-6">
                 {messages.map((msg, i) => (
@@ -352,7 +375,7 @@ function ChatRoom() {
                             className={`px-4 py-3 rounded-lg max-w-xs ${msg.isMine ? 'bg-green-500 text-white' : 'bg-white text-black shadow-sm'} border`}>
                             {/* 对方消息：显示原文小字 + 翻译后主文本 */}
                             {!msg.isMine && msg.original && (
-                                <p className="text-xs opacity-50 mb-1 whitespace-pre-wrap leading-relaxed">{originalMessageTip[myLang]}: {msg.original}</p>
+                                <p className="text-xs opacity-50 mb-1 whitespace-pre-wrap leading-relaxed">{originalMessageTip[theirLang]}: {msg.original}</p>
                             )}
 
                             {/* 主文本：自己发原始，对方发翻译后 */}
