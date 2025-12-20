@@ -1,5 +1,6 @@
 import React, {useState, useEffect, useRef} from 'react';
 import Peer from 'peerjs';
+import { Routes, Route, useParams } from 'react-router-dom';
 
 // 然后使用
 const myAvatar = '/assets/1.jpg';
@@ -70,7 +71,19 @@ const translate = async (text, sourceLang, targetLang) => {
 //     }
 // };
 
-function App() {
+export function App() {
+    return (
+        <Routes>
+            <Route path="/:urlId/:urlLang" element={<ChatRoom />} />
+            {/* 默认路径 / 显示连接页面 */}
+            <Route path="/" element={<ChatRoom />} />
+        </Routes>
+    );
+}
+
+
+function ChatRoom() {
+    const {urlId, urlLang } = useParams();
     const [myId, setMyId] = useState('');
     const [remoteId, setRemoteId] = useState('');
     const [myLang, setMyLang] = useState('zh');
@@ -79,12 +92,6 @@ function App() {
     const [messages, setMessages] = useState([]);
     const [connected, setConnected] = useState(false);
     const [isCopied, setIsCopied] = useState(false);
-    //是否通过链接打开
-    const [linkOpened] = useState(() => {
-        const urlParams = new URLSearchParams(window.location.search);
-        return !!urlParams.get('Id');
-    });
-
     const myLangRef = useRef(myLang);
     const myIdRef = useRef(null);
     const peerRef = useRef(null);
@@ -94,22 +101,33 @@ function App() {
     const peerId = useRef( null);
 
     useEffect(() => {
-        const urlParams = new URLSearchParams(window.location.search);
-        peerId.current = urlParams.get('Id');
-        console.log('打开时,获取对方的id:', peerId.current + ',我的语言:' + myLangRef.current);
-
-        if (peerId.current) {
-            myLangRef.current = urlParams.get('lang');
+        console.log('URL 参数:', { urlId, urlLang });
+        if (urlId && urlLang) {
+            console.log('通过链接打开,获取对方的id:', urlId + ',我的语言:' + urlLang)
+            peerId.current = urlId;
+            myLangRef.current = urlLang;
             setMyLang(myLangRef.current);
             linkOpen.current = true;
         }
-    }, [myLang])
+    }, [urlId, urlLang]);
+
+    // useEffect(() => {
+    //     const urlParams = new URLSearchParams(window.location.search);
+    //     peerId.current = urlParams.get('Id');
+    //     console.log('打开时,获取对方的id:', peerId.current + ',我的语言:' + myLangRef.current);
+    //
+    //     if (peerId.current) {
+    //         myLangRef.current = urlParams.get('lang');
+    //         setMyLang(myLangRef.current);
+    //         linkOpen.current = true;
+    //     }
+    // }, [myLang])
 
 
     const copyId = async () => {
         if (!myId) return;
         try {
-            await navigator.clipboard.writeText(`${import.meta.env.VITE_APP_BASE_URL}?Id=${myId}&lang=${theirLang}`);
+            await navigator.clipboard.writeText(`${import.meta.env.VITE_APP_BASE_URL}/${myId}/${theirLang}`);
             setIsCopied(true);
             setTimeout(() => setIsCopied(false), 2000); // 2秒后恢复
         } catch (e) {
@@ -252,7 +270,7 @@ function App() {
     };
 
     return (<div className="min-h-screen bg-gray-100 flex flex-col">
-        {!connected && !linkOpened ? (<div className="max-w-lg mx-auto mt-20 p-8 bg-white rounded-2xl shadow-2xl">
+        {!connected && !urlId && !urlLang ? (<div className="max-w-lg mx-auto mt-20 p-8 bg-white rounded-2xl shadow-2xl">
             <h1 className="text-2xl font-bold text-center mb-8">TransChat-跨语言沟通</h1>
             <p className="text-center mb-6 text-lg">
                 <strong className="text-green-600 text-4xl font-bold text-center mb-8">{myId || '加载中...'}</strong><br/>
@@ -264,7 +282,7 @@ function App() {
             <div className="mt-2 flex items-center justify-center mb-5">
                 <input
                     type="text"
-                    value={import.meta.env.VITE_APP_BASE_URL.replace('https://', '') + '?Id=' + myId + '&lang=' + theirLang}
+                    value={import.meta.env.VITE_APP_BASE_URL.replace('https://', '') + '/' + myId + '/' + theirLang}
                     readOnly
                     className="border border-gray-300 rounded px-3 py-1 text-sm bg-gray-50"
                 />
