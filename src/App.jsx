@@ -21,7 +21,11 @@ const originalMessageTip = {
 };
 
 const inputMessagePlaceholder = {
-    zh: '输入消息...', en: 'Input message..',   fr: 'Français', de: 'Deutsch', ja: '日本語',
+    zh: '输入消息...',
+    en: 'Input message..',
+    fr: 'Français',
+    de: 'Deutsch',
+    ja: '日本語',
 };
 
 // 固定头像（你可以换成自己喜欢的 URL）
@@ -36,6 +40,7 @@ const generateUsername = () => {
 };
 
 const translate = async (text, sourceLang, targetLang) => {
+    console.log('正在尝试翻译:' + text + ',源语言:' + sourceLang + ',目标语言:' + targetLang);
     if (sourceLang === targetLang || !text.trim()) return text;
     const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
     try {
@@ -56,86 +61,93 @@ function App() {
     const [message, setMessage] = useState('');
     const [messages, setMessages] = useState([]);
     const [connected, setConnected] = useState(false);
+    const [isCopied, setIsCopied] = useState(false);
+    //是否通过链接打开
+    const [linkOpened] = useState(() => {
+        const urlParams = new URLSearchParams(window.location.search);
+        return !!urlParams.get('Id');
+    });
+
+    const myLangRef = useRef(null);
+    const myIdRef = useRef(null);
     const peerRef = useRef(null);
     const connRef = useRef(null);
     const messagesEndRef = useRef(null);
-    const [isCopied, setIsCopied] = useState(false);
+    const linkOpen = useRef(false);
+    const peerId = useRef( null);
+
+    useEffect(() => {
+        const urlParams = new URLSearchParams(window.location.search);
+        peerId.current = urlParams.get('Id');
+        console.log('打开时,获取对方的id:', peerId.current + ',我的语言:' + myLangRef.current);
+
+        if (peerId.current) {
+            myLangRef.current = urlParams.get('lang');
+            setMyLang(myLangRef.current);
+            linkOpen.current = true;
+        }
+    }, [myLang])
+
 
     const copyId = async () => {
         if (!myId) return;
         try {
-            await navigator.clipboard.writeText(`${import.meta.env.VITE_APP_BASE_URL}?Id=${myId}`);
+            await navigator.clipboard.writeText(`${import.meta.env.VITE_APP_BASE_URL}?Id=${myId}&lang=${theirLang}`);
             setIsCopied(true);
             setTimeout(() => setIsCopied(false), 2000); // 2秒后恢复
         } catch (e) {
-            console.log('复制失败');
+            console.error('复制失败',e);
+            alert('复制失败');
         }
     };
 
 
+
+    const changeMyLang = async (lang) => {
+        setMyLang(lang);
+        myLangRef.current = lang
+        console.log('change我的语言：' + lang);
+    };
+
     const setupConn = (conn) => {
-        // conn.send({type: 'init', lang: myLang, id: myId});
+        conn.send({type: 'init', lang: myLang, id: myId});
 
         conn.on('data', async (data) => {
             if (data.type === 'init') {
+                console.log('监听init数据，保存对方的id:', data.id + ',和对方语言:' + data.lang);
+                setRemoteId(data.id);
                 setTheirLang(data.lang);
-                setRemoteId(data.id);  // 保存对方的 ID
-                console.log('对方ID已设置为:', data.id); // 添加日志确认ID设置
+                setMyLang(myLangRef.current);
             } else if (data.type === 'lang') {
+                console.log('监听lang数据，保存对方语言:' + data.lang);
                 setTheirLang(data.lang);
             } else if (data.type === 'msg') {
-                const translated = await translate(data.text, data.lang, myLang);
+                console.log('监听msg数据，对方的语言:', data.lang + ',我的语言:' + myLangRef.current);
+                const translated = await translate(data.text, data.lang, myLangRef.current);
                 setMessages(prev => [...prev, {
                     text: translated, original: data.text, isMine: false
                 }]);
+
             }
         });
     };
 
-// 将 connect 函数改为异步函数，便于在 useEffect 中调用
-    const connect = async () => {
-        console.log('正在尝试连接...,remoteId:' + remoteId );
-        if (!remoteId.trim()) return;
-
-        try {
-            console.log('正在尝试连接...');
-            const conn = peerRef.current.connect(remoteId);
-            connRef.current = conn;
-
-            // 监听连接打开事件
-            conn.on('open', () => {
-                console.log('已连接！');
-                setConnected(true);
-                // 连接成功后发送初始化信息
-                conn.send({type: 'init', lang: myLang, id: myId});
-                setupConn(conn);
-            });
-
-            // 监听连接错误
-            conn.on('error', (err) => {
-                console.error('连接失败:', err);
-            });
-        } catch (error) {
-            console.error('连接过程中发生错误:', error);
-        }
-    };
-
     // 创建一个新的函数来处理连接，接收peerId作为参数
-    const connectWithPeerId = (remoteId, myId) => {
-        console.log('正在尝试连接:' + remoteId);
+    const connectWithPeerId = (remoteId,lang) => {
+        console.log('正在尝试连接对方:' + remoteId);
         if (!remoteId.trim()) return;
 
         try {
             const conn = peerRef.current.connect(remoteId);
             connRef.current = conn;
-            console.log('已连接！');
+
+            console.log('已连接:' + myId + ",lang:" + myLang);
 
             // 监听连接打开事件
             conn.on('open', () => {
                 setConnected(true);
-                // 连接成功后发送初始化信息
-                console.log('连接成功后发送我的信息:' + myId);
-                conn.send({type: 'init', lang: myLang, id: myId});
+                console.log('连接成功后发送我的信息id:' + myIdRef.current + ",lang:" + lang);
+                conn.send({type: 'init', lang: lang, id: myIdRef.current});
                 setupConn(conn);
             });
 
@@ -147,45 +159,43 @@ function App() {
             console.error('连接过程中发生错误:', error);
         }
     };
-
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({behavior: 'smooth'});
     }, [messages]);
 
-
     useEffect(() => {
         const shortId = generateUsername();
         try {
             const peer = new Peer(shortId);
-            // const peer = new Peer(shortId, {
-            //     host: 'localhost', // 替换为你的服务器域名
-            //     port: 9000,
-            //     path: '/peerjs' // 与服务器配置一致
-            // });
+
             peerRef.current = peer;
 
             peer.on('open', (id) => {
                 console.log('生成我的id:', id);
                 setMyId(id);
+                myIdRef.current = id;
 
-                const urlParams = new URLSearchParams(window.location.search);
-                const peerId = urlParams.get('Id');
-                if (peerId) {
-                    console.log('通过url获取对方的id:', peerId)
-                    setRemoteId(peerId);
+                console.log("是否链接打开：" + linkOpen.current);
+                if (linkOpen.current) {
+                    const linkParams = new URLSearchParams(window.location.search);
+                    console.log('通过链接打开时,设置对方的id:', peerId.current + ',和我的语言:' + linkParams.get('lang'))
+                    myLangRef.current = linkParams.get('lang');
+                    setMyLang(linkParams.get('lang'));
+                    setRemoteId(peerId.current);
                     // 直接使用peerId而不是remoteId状态变量，因为状态更新是异步的
-                    connectWithPeerId(peerId, id);
+                    connectWithPeerId(peerId.current, linkParams.get('lang'));
+                }else {
+                    console.log('我的语言：' + myLang);
                 }
+
             });
 
             peer.on('connection', (conn) => {
                 connRef.current = conn;
                 setConnected(true);
-                // 当有其他客户端连接我们时，我们也需要发送初始化信息
+                //当有其他客户端连接我们时，我们也需要发送初始化信息
                 conn.send({type: 'init', lang: myLang, id: myId});
-
-
                 setupConn(conn);
             });
 
@@ -206,7 +216,7 @@ function App() {
     const send = async () => {
         if (!message.trim() || !connRef.current) return;
 
-        const translated = await translate(message, myLang, theirLang); // 只给自己看小字翻译
+        console.log('发送信息:' + message + ',我的语言:' + myLang);
 
         // 关键：发送时带上自己的语言
         connRef.current.send({
@@ -215,27 +225,31 @@ function App() {
         });
 
         setMessages(prev => [...prev, {
-            text: message, translated, isMine: true
+            text: message, isMine: true
         }]);
         setMessage('');
     };
 
     return (<div className="min-h-screen bg-gray-100 flex flex-col">
-        {!connected ? (<div className="max-w-lg mx-auto mt-20 p-8 bg-white rounded-2xl shadow-2xl">
+        {!connected && !linkOpened ? (<div className="max-w-lg mx-auto mt-20 p-8 bg-white rounded-2xl shadow-2xl">
             <h1 className="text-4xl font-bold text-center mb-8">TransChat-跨语言实时聊天</h1>
             <p className="text-center mb-6 text-lg">
                 <strong className="text-green-600 text-4xl font-bold text-center mb-8">{myId || '加载中...'}</strong><br/>
             </p>
+            <div className="text-sm text-gray-600 mr-3 text-center">
+                 分享链接给对方即可聊天
+            </div>
+
             <div className="mt-2 flex items-center justify-center mb-5">
-                <span className="text-sm text-gray-600 mr-3">分享链接</span>
                 <input
                     type="text"
-                    value={`${import.meta.env.VITE_APP_BASE_URL}?Id=${myId}`}
+                    value={import.meta.env.VITE_APP_BASE_URL.replace('https://', '') + '?Id=' + myId + '&lang=' + theirLang}
                     readOnly
                     className="border border-gray-300 rounded px-3 py-1 text-sm bg-gray-50"
                 />
 
-                <button onClick={copyId}  className="ml-2 bg-green-500 text-white pl-1 pr-3 py-1 rounded text-sm flex items-center" >
+
+                <button onClick={copyId}  className="ml-2 bg-blue-500 text-white pl-1 pr-3 py-1 rounded text-sm flex items-center" >
                     {!isCopied && (
                         <>
                             <svg className="w-7 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5">
@@ -253,24 +267,15 @@ function App() {
                         </>
                     )}
                 </button>
-
-
-
             </div>
 
-            <input
-                className="w-full border-2 border-gray-300 rounded-xl px-5 py-4 mb-8 text-lg"
-                placeholder="输入对方 ID"
-                value={remoteId}
-                onChange={e => setRemoteId(e.target.value)}
-            />
 
             <div className="mb-8">
                 <label className="block text-lg font-medium mb-3">我的语言</label>
                 <select
                     className="w-full border-2 border-gray-300 rounded-xl px-5 py-4 text-lg bg-white focus:ring-2 focus:ring-green-500 focus:border-transparent appearance-none"
                     value={myLang}
-                    onChange={e => setMyLang(e.target.value)}
+                    onChange={e => changeMyLang(e.target.value)}
                 >
                     {Object.entries(languages).map(([code, name]) => (
                         <option key={code} value={code}>{name}</option>
@@ -279,13 +284,20 @@ function App() {
 
             </div>
 
+            <div className="mb-8">
+                <label className="block text-lg font-medium mb-3">对方语言</label>
+                <select
+                    className="w-full border-2 border-gray-300 rounded-xl px-5 py-4 text-lg bg-white focus:ring-2 focus:ring-green-500 focus:border-transparent appearance-none"
+                    value={theirLang}
+                    onChange={e => setTheirLang(e.target.value)}
+                >
+                    {Object.entries(languages).map(([code, name]) => (
+                        <option key={code} value={code}>{name}</option>
+                    ))}
+                </select>
 
-            <button
-                onClick={connect}
-                className="w-full bg-green-600 text-white py-5 rounded-xl text-xl font-semibold hover:bg-green-700 shadow-lg"
-            >
-                连接
-            </button>
+            </div>
+
         </div>) : (<div className="max-w-2xl w-full mx-auto flex flex-col h-screen bg-gray-100">
             <div className="bg-gray-50 px-4 py-3 text-center  ">
                 <h2 className="text-lg font-semibold">{remoteId}</h2>
@@ -301,11 +313,11 @@ function App() {
                             className={`px-4 py-3 rounded-lg max-w-xs ${msg.isMine ? 'bg-green-500 text-white' : 'bg-white text-black shadow-sm'} border`}>
                             {/* 对方消息：显示原文小字 + 翻译后主文本 */}
                             {!msg.isMine && msg.original && (
-                                <p className="text-xs opacity-50 mb-1">{originalMessageTip[myLang]}: {msg.original}</p>
+                                <p className="text-xs opacity-50 mb-1 whitespace-pre-wrap leading-relaxed">{originalMessageTip[myLang]}: {msg.original}</p>
                             )}
 
                             {/* 主文本：自己发原始，对方发翻译后 */}
-                            <p className="text-base break-words">{msg.text}</p>
+                            <p className="text-base break-words whitespace-pre-wrap leading-relaxed">{msg.text}</p>
 
                         </div>
 
@@ -316,22 +328,22 @@ function App() {
             </div>
 
             <div className="bg-gray-50 border border-gray-200 p-3 flex items-center mb-3">
-
-
                 <div className="flex-1  rounded-lg px-4 py-2 min-h-[60px] relative">
-
                     <textarea
                         className="bg-gray w-full h-full bg-transparent border-none outline-none resize-none"
                         value={message}
                         onChange={e => setMessage(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && send()}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+                                e.preventDefault(); // 阻止默认的换行行为
+                                send();
+                            }
+                        }}
                         placeholder={`${inputMessagePlaceholder[myLang]}`}
                         rows={2}
                     ></textarea>
 
                 </div>
-
-
                 <button onClick={send}
                         className="bg-green-500 text-white w-12 h-12 rounded-full flex items-center justify-center ml-1">
                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -339,10 +351,7 @@ function App() {
                               d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
                     </svg>
                 </button>
-
             </div>
-
-
         </div>)}
     </div>);
 }
