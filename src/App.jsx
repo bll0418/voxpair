@@ -68,7 +68,7 @@ function App() {
         return !!urlParams.get('Id');
     });
 
-    const myLangRef = useRef(null);
+    const myLangRef = useRef(myLang);
     const myIdRef = useRef(null);
     const peerRef = useRef(null);
     const connRef = useRef(null);
@@ -110,7 +110,7 @@ function App() {
     };
 
     const setupConn = (conn) => {
-        conn.send({type: 'init', lang: myLang, id: myId});
+        //conn.send({type: 'init', lang: myLang, id: myId});
 
         conn.on('data', async (data) => {
             if (data.type === 'init') {
