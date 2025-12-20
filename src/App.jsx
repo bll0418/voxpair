@@ -28,13 +28,16 @@ const inputMessagePlaceholder = {
     ja: '日本語',
 };
 
-// 固定头像（你可以换成自己喜欢的 URL）
-
+//用户id:4位字母 + 3位数字
 const generateUsername = () => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    let result = '';
-    for (let i = 0; i < 6; i++) {  // ← 这里从 8 改成 6
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
+    const chars1 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+    const chars2 = '0123456789';
+    let result = "";
+    for (let i = 0; i < 4; i++) {
+        result += chars1.charAt(Math.floor(Math.random() * chars1.length));
+    }
+    for (let i = 0; i < 3; i++) {
+        result += chars2.charAt(Math.floor(Math.random() * chars2.length));
     }
     return result;
 };
@@ -42,16 +45,30 @@ const generateUsername = () => {
 const translate = async (text, sourceLang, targetLang) => {
     console.log('正在尝试翻译:' + text + ',源语言:' + sourceLang + ',目标语言:' + targetLang);
     if (sourceLang === targetLang || !text.trim()) return text;
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLang}|${targetLang}`;
     try {
         const res = await fetch(url);
         const data = await res.json();
-        return data[0].map(segment => segment[0]).join('');
+        return data.responseData.translatedText || text;
     } catch (e) {
         console.error("翻译失败：" + e);
         return text + ' (翻译失败)';
     }
 };
+
+// const translate = async (text, sourceLang, targetLang) => {
+//     console.log('正在尝试翻译:' + text + ',源语言:' + sourceLang + ',目标语言:' + targetLang);
+//     if (sourceLang === targetLang || !text.trim()) return text;
+//     const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
+//     try {
+//         const res = await fetch(url);
+//         const data = await res.json();
+//         return data[0].map(segment => segment[0]).join('');
+//     } catch (e) {
+//         console.error("翻译失败：" + e);
+//         return text + ' (翻译失败)';
+//     }
+// };
 
 function App() {
     const [myId, setMyId] = useState('');
@@ -179,9 +196,12 @@ function App() {
                 console.log("是否链接打开：" + linkOpen.current);
                 if (linkOpen.current) {
                     const linkParams = new URLSearchParams(window.location.search);
-                    console.log('通过链接打开时,设置对方的id:', peerId.current + ',和我的语言:' + linkParams.get('lang'))
-                    myLangRef.current = linkParams.get('lang');
-                    setMyLang(linkParams.get('lang'));
+                    const langParam = linkParams.get('lang');
+                    console.log('通过链接打开时,设置对方的id:', peerId.current + ',和我的语言:' + langParam);
+                    // 只在没有默认值时才设置
+                    if (!myLang && langParam) {
+                        setMyLang(langParam);
+                    }
                     setRemoteId(peerId.current);
                     // 直接使用peerId而不是remoteId状态变量，因为状态更新是异步的
                     connectWithPeerId(peerId.current, linkParams.get('lang'));
@@ -201,6 +221,7 @@ function App() {
 
             peer.on('error', (err) => {
                 console.error('Peer.js 错误:', err);
+                // alert('此链接已失效,请重新获取！')
             });
         } catch (error) {
             console.error('Peer.js 初始化失败:', error);
@@ -232,11 +253,11 @@ function App() {
 
     return (<div className="min-h-screen bg-gray-100 flex flex-col">
         {!connected && !linkOpened ? (<div className="max-w-lg mx-auto mt-20 p-8 bg-white rounded-2xl shadow-2xl">
-            <h1 className="text-4xl font-bold text-center mb-8">TransChat-跨语言实时聊天</h1>
+            <h1 className="text-2xl font-bold text-center mb-8">TransChat-跨语言沟通</h1>
             <p className="text-center mb-6 text-lg">
                 <strong className="text-green-600 text-4xl font-bold text-center mb-8">{myId || '加载中...'}</strong><br/>
             </p>
-            <div className="text-sm text-gray-600 mr-3 text-center">
+            <div className="text-sm text-gray-600 mr-3 mb-5 text-center">
                  分享链接给对方即可聊天
             </div>
 
