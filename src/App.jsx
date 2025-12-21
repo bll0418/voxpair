@@ -1,7 +1,6 @@
 import React, {useState, useEffect, useRef} from 'react';
 import Peer from 'peerjs';
-import { Routes, Route, useParams } from 'react-router-dom';
-
+import { Routes, Route, useParams, useNavigate } from 'react-router-dom';
 // 然后使用
 const myAvatar = '/assets/1.jpg';
 const theirAvatar = '/assets/2.jpg';
@@ -84,6 +83,7 @@ export function App() {
 
 function ChatRoom() {
     const {urlId, urlLang } = useParams();
+    const navigate = useNavigate();
     const [myId, setMyId] = useState('');
     const [remoteId, setRemoteId] = useState('');
     const [myLang, setMyLang] = useState('zh');
@@ -100,6 +100,51 @@ function ChatRoom() {
     const linkOpen = useRef(false);
     const peerId = useRef( null);
 
+    const getStorageKey = (targetId, currentMyId) => {
+        if (!targetId || !currentMyId) return null;
+        return `chat_history_${targetId}_${currentMyId}`;
+    };
+
+    // 修改后的保存函数
+    const saveToSession = (newMessages, targetId) => {
+        const key = getStorageKey(targetId);
+        if (key) {
+            sessionStorage.setItem(key, JSON.stringify(newMessages));
+        }
+    };
+
+    const getPersistentId = () => {
+        let id = sessionStorage.getItem('my_peer_id');
+        console.log('获取的urlId:', !id && !urlId);
+        if (!id || !urlId) {
+            id = generateUsername();
+            sessionStorage.setItem('my_peer_id', id);
+        }
+        return id;
+    };
+
+    // 2. 增加一个专门负责加载历史记录的函数
+    const loadHistory = (targetId, currentId) => {
+        const key = getStorageKey(targetId, currentId);
+        if (key) {
+            const saved = sessionStorage.getItem(key);
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                console.log(`加载历史记录 [${key}]:`, parsed.length, "条");
+                setMessages(parsed);
+            } else {
+                setMessages([]);
+            }
+        }
+    };
+    // 3. 监听 remoteId 的变化
+    useEffect(() => {
+        if (remoteId && myIdRef.current) {
+            loadHistory(remoteId, myIdRef.current);
+        }
+    }, [remoteId]); // 当对方 ID 确定时，加载记录
+
+
     useEffect(() => {
         console.log('通过链接打开,获取对方的id:', urlId + ',我的语言:' + urlLang)
         if (urlId && urlLang) {
@@ -109,19 +154,6 @@ function ChatRoom() {
             linkOpen.current = true;
         }
     }, [urlId, urlLang]);
-
-    // useEffect(() => {
-    //     const urlParams = new URLSearchParams(window.location.search);
-    //     peerId.current = urlParams.get('Id');
-    //     console.log('打开时,获取对方的id:', peerId.current + ',我的语言:' + myLangRef.current);
-    //
-    //     if (peerId.current) {
-    //         myLangRef.current = urlParams.get('lang');
-    //         setMyLang(myLangRef.current);
-    //         linkOpen.current = true;
-    //     }
-    // }, [myLang])
-
 
     const copyId = async () => {
         if (!myId) return;
@@ -158,15 +190,32 @@ function ChatRoom() {
                 setRemoteId(data.id);
                 setTheirLang(data.lang);
                 setMyLang(myLangRef.current);
+                // 加载历史记录
+                loadHistory(data.id, myIdRef.current);
+                // A 收到 B 的 init 后，如果地址栏没 ID，自动跳转
+                if (!urlId) {
+                    navigate(`/${data.id}/${myLangRef.current}`, { replace: true });
+                }
             } else if (data.type === 'lang') {
                 console.log('监听lang数据，保存对方语言:' + data.lang);
                 setTheirLang(data.lang);
             } else if (data.type === 'msg') {
                 console.log('监听msg数据，对方的语言:', data.lang + ',我的语言:' + myLangRef.current);
+
                 const translated = await translate(data.text, data.lang, myLangRef.current);
-                setMessages(prev => [...prev, {
-                    text: translated, original: data.text, isMine: false
-                }]);
+                const newMessage = {
+                    text: translated,
+                    original: data.text,
+                    isMine: false
+                };
+
+                setMessages(prev => {
+                    const updated = [...prev, newMessage];
+                    // 使用新格式 Key 保存：conn.peer 是对方，myIdRef.current 是自己
+                    const key = getStorageKey(conn.peer, myIdRef.current);
+                    if (key) sessionStorage.setItem(key, JSON.stringify(updated));
+                    return updated;
+                });
 
             }
         });
@@ -205,7 +254,8 @@ function ChatRoom() {
     }, [messages]);
 
     useEffect(() => {
-        const shortId = generateUsername();
+
+        const shortId = getPersistentId(); // 使用固定的 ID
         try {
             // const peer = new Peer(shortId);
             // const peer = new Peer(shortId, {
@@ -234,19 +284,26 @@ function ChatRoom() {
             peerRef.current = peer;
 
             peer.on('open', (id) => {
-                console.log('生成我的id:', id);
+                console.log('我的ID已就绪:', id);
                 setMyId(id);
                 myIdRef.current = id;
 
-                console.log("是否链接打开：" + linkOpen.current);
-                if (linkOpen.current) {
-                    console.log('通过链接打开时,设置对方的id:', peerId.current + ',和我的语言:' + urlLang);
-                    setRemoteId(peerId.current);
-                    // 直接使用peerId而不是remoteId状态变量，因为状态更新是异步的
-                    connectWithPeerId(peerId.current, urlLang);
+                setRemoteId(urlId); // 这一步会触发上面的 useEffect 加载历史
+
+                // 检查 URL 路由参数（无论是不是通过 linkOpen 变量）
+                // 只要 urlId 存在，就说明这是一个预设的聊天室，需要自动重连
+                if (urlId) {
+                    console.log('检测到 URL 中有目标 ID，正在尝试自动恢复连接:'+ urlId + ',和我的语言:' + urlLang);
+                    setRemoteId(urlId);
+                    // 立即加载历史记录 (根据新 Key 格式)
+                    loadHistory(urlId, id);
+
+                    // 执行自动重连
+                    connectWithPeerId(urlId, urlLang || myLangRef.current);
                 }else {
                     console.log('我的语言：' + myLang);
                 }
+
             });
 
             peer.on('connection', (conn) => {
@@ -274,30 +331,26 @@ function ChatRoom() {
     }, []);
 
     const send = async () => {
-        if (!message.trim()) return;
-
-        if (!connRef.current) {
-            alert('未连接对方');
-            return;
-        }
-        // 关键检查：DataConnection 是否已 open
-        if (!connRef.current.open) {
-            alert('连接建立中，请稍等...');
-            return;
-        }
-
+        if (!message.trim() || !connRef.current || !connRef.current.open) return;
         console.log('发送信息:' + message + ',我的语言:' + myLang);
-
-        // 关键：发送时带上自己的语言
         connRef.current.send({
             type: 'msg',
             text: message,
             lang: myLang
         });
 
-        const translated = await translate(message, myLang, theirLang);
 
-        setMessages(prev => [...prev, { text: message, translated, isMine: true }]);
+        const newMessage = { text: message, isMine: true };
+
+
+
+        setMessages(prev => {
+            const updated = [...prev, newMessage];
+            // 使用新格式 Key 保存
+            const key = getStorageKey(remoteId, myIdRef.current);
+            if (key) sessionStorage.setItem(key, JSON.stringify(updated));
+            return updated;
+        });
         setMessage('');
     };
 
