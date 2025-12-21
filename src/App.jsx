@@ -207,7 +207,30 @@ function ChatRoom() {
     useEffect(() => {
         const shortId = generateUsername();
         try {
-            const peer = new Peer(shortId);
+            // const peer = new Peer(shortId);
+            // const peer = new Peer(shortId, {
+            //     host: '127.0.0.1',
+            //     secure: false,
+            //     port: 8787,
+            //     path: '/',
+            //     debug: 0
+            // });
+            //rapid-silence-5126.bll0418.workers.dev
+            const peer = new Peer(shortId, {
+                host: 'peerjs.asktraceai.com',
+                port: 443,
+                secure: true,
+                path: '/',
+                config: {
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' },
+                        // 加国内快 STUN（可选）
+                        { urls: 'stun:stun.qq.com:3478' }
+                    ]
+                }
+            });
+
             peerRef.current = peer;
 
             peer.on('open', (id) => {
@@ -224,10 +247,10 @@ function ChatRoom() {
                 }else {
                     console.log('我的语言：' + myLang);
                 }
-
             });
 
             peer.on('connection', (conn) => {
+                console.log('收到新的连接');
                 connRef.current = conn;
                 setConnected(true);
                 //当有其他客户端连接我们时，我们也需要发送初始化信息
@@ -251,21 +274,33 @@ function ChatRoom() {
     }, []);
 
     const send = async () => {
-        if (!message.trim() || !connRef.current) return;
+        if (!message.trim()) return;
+
+        if (!connRef.current) {
+            alert('未连接对方');
+            return;
+        }
+        // 关键检查：DataConnection 是否已 open
+        if (!connRef.current.open) {
+            alert('连接建立中，请稍等...');
+            return;
+        }
 
         console.log('发送信息:' + message + ',我的语言:' + myLang);
 
         // 关键：发送时带上自己的语言
         connRef.current.send({
-            type: 'msg', text: message,      // 原始文本
-            lang: myLang        // 自己的语言代码！！！
+            type: 'msg',
+            text: message,
+            lang: myLang
         });
 
-        setMessages(prev => [...prev, {
-            text: message, isMine: true
-        }]);
+        const translated = await translate(message, myLang, theirLang);
+
+        setMessages(prev => [...prev, { text: message, translated, isMine: true }]);
         setMessage('');
     };
+
 
     return (<div className="min-h-screen bg-gray-100 flex flex-col">
         {!connected && !urlId && !urlLang ? (<div className="max-w-lg mx-auto mt-20 p-8 bg-white rounded-2xl shadow-2xl">
