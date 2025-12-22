@@ -261,9 +261,19 @@ function ChatRoom() {
             peer.on('connection', (conn) => {
                 console.log('收到新的连接');
                 connRef.current = conn;
-                setConnected(true);
-                conn.send({type: 'init', lang: myLangRef.current, id: myPeerIdRef.current});
-                setupConn(conn);
+
+                // 等待连接真正打开后再发送初始化信息
+                conn.on('open', () => {
+                    console.log('连接已打开，发送初始化信息');
+                    setConnected(true);
+                    conn.send({type: 'init', lang: myLangRef.current, id: myPeerIdRef.current});
+                    setupConn(conn);
+                });
+
+                // 添加连接错误处理
+                conn.on('error', (err) => {
+                    console.error('连接错误:', err);
+                });
             });
 
             peer.on('error', (err) => {
