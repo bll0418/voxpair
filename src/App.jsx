@@ -262,6 +262,7 @@ function ChatRoom() {
                 console.log('收到新的连接');
                 connRef.current = conn;
                 setConnected(true);
+                conn.send({type: 'init', lang: myLangRef.current, id: myPeerIdRef.current});
                 setupConn(conn);
             });
 
