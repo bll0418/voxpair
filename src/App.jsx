@@ -15,9 +15,9 @@ const languages = {
 const originalMessageTip = {
     zh: '原文',
     en: 'original',
-    fr: 'Français',
+    fr: 'original',
     de: 'Deutsch',
-    ja: '日本語',
+    ja: '原文',
 };
 
 const inputMessagePlaceholder = {
@@ -30,16 +30,28 @@ const inputMessagePlaceholder = {
 
 //用户id:4位字母 + 3位数字
 const generateUsername = () => {
-    const chars1 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-    const chars2 = '0123456789';
-    let result = "";
-    for (let i = 0; i < 4; i++) {
-        result += chars1.charAt(Math.floor(Math.random() * chars1.length));
+    const s = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    const n = "0123456789";
+    const r = (src, len) => Array.from({length: len}, () => src[Math.floor(Math.random() * src.length)]).join('');
+    return r(s, 4) + r(n, 3);
+};
+
+//获取我的id,先从sessionStorage中获取
+const getMyPeerId = () => {
+    let myPeerId = sessionStorage.getItem('myPeerId');
+   //console.log('从sessionStorage获取的myPeerId:', myPeerId);
+    if (!myPeerId) {
+        myPeerId = generateUsername();
+        sessionStorage.setItem('myPeerId', myPeerId);
+        console.log('生成新的myPeerId:', myPeerId);
     }
-    for (let i = 0; i < 3; i++) {
-        result += chars2.charAt(Math.floor(Math.random() * chars2.length));
-    }
-    return result;
+    return myPeerId;
+};
+
+//获取聊天记录缓存key
+const getHistoryKey = (targetId, currentId) => {
+    if (!targetId || !currentId) return null;
+    return `chat_history_${targetId}_${currentId}`;
 };
 
 const translate = async (text, sourceLang, targetLang) => {
@@ -54,6 +66,23 @@ const translate = async (text, sourceLang, targetLang) => {
         console.error("翻译失败：" + e);
         return text + ' (翻译失败)';
     }
+};
+
+const getPeer = (peerId) => {
+    return new Peer(peerId, {
+        host: 'peerjs.asktraceai.com',
+        port: 443,
+        secure: true,
+        path: '/',
+        config: {
+            iceServers: [
+                {urls: 'stun:stun.l.google.com:19302'},
+                {urls: 'stun:stun1.l.google.com:19302'},
+                // 加国内快 STUN（可选）
+                {urls: 'stun:stun.qq.com:3478'}
+            ]
+        }
+    })
 };
 
 // const translate = async (text, sourceLang, targetLang) => {
@@ -74,7 +103,6 @@ export function App() {
     return (
         <Routes>
             <Route path="/:urlId/:urlLang" element={<ChatRoom />} />
-            {/* 默认路径 / 显示连接页面 */}
             <Route path="/" element={<ChatRoom />} />
         </Routes>
     );
@@ -84,48 +112,31 @@ export function App() {
 function ChatRoom() {
     const {urlId, urlLang } = useParams();
     const navigate = useNavigate();
-    const [myId, setMyId] = useState('');
-    const [remoteId, setRemoteId] = useState('');
+
     const [myLang, setMyLang] = useState('zh');
     const [theirLang, setTheirLang] = useState('en');
     const [message, setMessage] = useState('');
     const [messages, setMessages] = useState([]);
     const [connected, setConnected] = useState(false);
     const [isCopied, setIsCopied] = useState(false);
-    const myLangRef = useRef(myLang);
-    const myIdRef = useRef(null);
+
+
     const peerRef = useRef(null);
     const connRef = useRef(null);
     const messagesEndRef = useRef(null);
-    const linkOpen = useRef(false);
-    const peerId = useRef( null);
 
-    const getStorageKey = (targetId, currentMyId) => {
-        if (!targetId || !currentMyId) return null;
-        return `chat_history_${targetId}_${currentMyId}`;
-    };
 
-    // 修改后的保存函数
-    const saveToSession = (newMessages, targetId) => {
-        const key = getStorageKey(targetId);
-        if (key) {
-            sessionStorage.setItem(key, JSON.stringify(newMessages));
-        }
-    };
+    //我的id从缓存获取或自动生成
+    const myPeerId = getMyPeerId();
+    const myPeerIdRef = useRef(myPeerId);
+    const myLangRef = useRef(urlLang || 'zh');
+    //对方的id从url中获取
+    const theirPeerIdRef = useRef(urlId);
+    const theirLangRef = useRef('en');
 
-    const getPersistentId = () => {
-        let id = sessionStorage.getItem('my_peer_id');
-        console.log('获取的urlId:', !id && !urlId);
-        if (!id || !urlId) {
-            id = generateUsername();
-            sessionStorage.setItem('my_peer_id', id);
-        }
-        return id;
-    };
-
-    // 2. 增加一个专门负责加载历史记录的函数
+    //加载历史记录
     const loadHistory = (targetId, currentId) => {
-        const key = getStorageKey(targetId, currentId);
+        const key = getHistoryKey(targetId, currentId);
         if (key) {
             const saved = sessionStorage.getItem(key);
             if (saved) {
@@ -137,40 +148,22 @@ function ChatRoom() {
             }
         }
     };
-    // 3. 监听 remoteId 的变化
-    useEffect(() => {
-        if (remoteId && myIdRef.current) {
-            loadHistory(remoteId, myIdRef.current);
-        }
-    }, [remoteId]); // 当对方 ID 确定时，加载记录
 
-
-    useEffect(() => {
-        console.log('通过链接打开,获取对方的id:', urlId + ',我的语言:' + urlLang)
-        if (urlId && urlLang) {
-            peerId.current = urlId;
-            myLangRef.current = urlLang;
-            setMyLang(myLangRef.current);
-            linkOpen.current = true;
-        }
-    }, [urlId, urlLang]);
 
     const copyId = async () => {
-        if (!myId) return;
+        if (!myPeerIdRef.current) return;
         try {
-            await navigator.clipboard.writeText(`${import.meta.env.VITE_APP_BASE_URL}/${myId}/${theirLang}`);
+            await navigator.clipboard.writeText(`${import.meta.env.VITE_APP_BASE_URL}/${myPeerIdRef.current}/${theirLang}`);
             setIsCopied(true);
-            setTimeout(() => setIsCopied(false), 2000); // 2秒后恢复
+            setTimeout(() => setIsCopied(false), 2000);
         } catch (e) {
             console.error('复制失败',e);
-            alert('复制失败');
         }
     };
 
 
-
     const changeMyLang = async (newLang) => {
-        setMyLang(newLang);
+
         myLangRef.current = newLang
         console.log('change我的语言：' + newLang);
         if (connRef.current && connected) {
@@ -182,25 +175,22 @@ function ChatRoom() {
     };
 
     const setupConn = (conn) => {
-        //conn.send({type: 'init', lang: myLang, id: myId});
-
         conn.on('data', async (data) => {
             if (data.type === 'init') {
-                console.log('监听init数据，保存对方的id:', data.id + ',和对方语言:' + data.lang);
-                setRemoteId(data.id);
-                setTheirLang(data.lang);
-                setMyLang(myLangRef.current);
-                // 加载历史记录
-                loadHistory(data.id, myIdRef.current);
-                // A 收到 B 的 init 后，如果地址栏没 ID，自动跳转
+                console.log('监听到init数据,加载历史记录，保存对方的id:', data.id + ',对方语言:' + data.lang);
+                theirPeerIdRef.current = data.id;
+                theirLangRef.current = data.lang;
+                loadHistory(theirPeerIdRef.current, myPeerIdRef.current);
+
                 if (!urlId) {
-                    navigate(`/${data.id}/${myLangRef.current}`, { replace: true });
+                    console.log('url自动跳转');
+                    navigate(`/${theirPeerIdRef.current}/${myLangRef.current}`, { replace: true });
                 }
             } else if (data.type === 'lang') {
                 console.log('监听lang数据，保存对方语言:' + data.lang);
-                setTheirLang(data.lang);
+                theirLangRef.current = data.lang;
             } else if (data.type === 'msg') {
-                console.log('监听msg数据，对方的语言:', data.lang + ',我的语言:' + myLangRef.current);
+                console.log('监听到msg数据:'+ data.text +',对方的语言:', data.lang + ',我的语言:' + myLangRef.current);
 
                 const translated = await translate(data.text, data.lang, myLangRef.current);
                 const newMessage = {
@@ -212,112 +202,71 @@ function ChatRoom() {
                 setMessages(prev => {
                     const updated = [...prev, newMessage];
                     // 使用新格式 Key 保存：conn.peer 是对方，myIdRef.current 是自己
-                    const key = getStorageKey(conn.peer, myIdRef.current);
+                    const key = getHistoryKey(theirPeerIdRef.current, myPeerIdRef.current);
                     if (key) sessionStorage.setItem(key, JSON.stringify(updated));
                     return updated;
                 });
-
             }
         });
-    };
 
-    // 创建一个新的函数来处理连接，接收peerId作为参数
-    const connectWithPeerId = (remoteId,lang) => {
-        console.log('正在尝试连接对方:' + remoteId);
-        if (!remoteId.trim()) return;
-
-        try {
-            const conn = peerRef.current.connect(remoteId);
-            connRef.current = conn;
-
-            console.log('已连接');
-
-            // 监听连接打开事件
-            conn.on('open', () => {
-                setConnected(true);
-                console.log('连接成功后发送我的信息id:' + myIdRef.current + ",lang:" + lang);
-                conn.send({type: 'init', lang: lang, id: myIdRef.current});
-                setupConn(conn);
-            });
-
-            // 监听连接错误
-            conn.on('error', (err) => {
-                console.error('连接失败:', err);
-            });
-        } catch (error) {
-            console.error('连接过程中发生错误:', error);
-        }
+        // 监听连接错误
+        conn.on('error', (err) => {
+            console.error('连接失败:', err);
+        });
     };
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({behavior: 'smooth'});
-    }, [messages]);
+    }, [messages,myLang,urlId,urlLang]);
 
     useEffect(() => {
-
-        const shortId = getPersistentId(); // 使用固定的 ID
         try {
-            // const peer = new Peer(shortId);
-            // const peer = new Peer(shortId, {
-            //     host: '127.0.0.1',
-            //     secure: false,
-            //     port: 8787,
-            //     path: '/',
-            //     debug: 0
-            // });
-            //rapid-silence-5126.bll0418.workers.dev
-            const peer = new Peer(shortId, {
-                host: 'peerjs.asktraceai.com',
-                port: 443,
-                secure: true,
-                path: '/',
-                config: {
-                    iceServers: [
-                        { urls: 'stun:stun.l.google.com:19302' },
-                        { urls: 'stun:stun1.l.google.com:19302' },
-                        // 加国内快 STUN（可选）
-                        { urls: 'stun:stun.qq.com:3478' }
-                    ]
-                }
-            });
 
+            if (urlId && urlLang) {
+                console.log('通过分享链接打开,获取对方的id:', urlId + ',我的语言:' + urlLang)
+                theirPeerIdRef.current = urlId;
+                myLangRef.current = urlLang;
+                setMyLang(myLangRef.current);
+            }else{
+                console.log('通过主页打开,开始生成我的id');
+            }
+
+            // if(peerRef.current){
+            //     console.log('peer已存在，不重复创建');
+            //     return;
+            // }
+            const peer =  getPeer(myPeerIdRef.current);
             peerRef.current = peer;
+            console.log('创建我的Peer实例:', myPeerIdRef.current)
 
-            peer.on('open', (id) => {
-                console.log('我的ID已就绪:', id);
-                setMyId(id);
-                myIdRef.current = id;
-
-                setRemoteId(urlId); // 这一步会触发上面的 useEffect 加载历史
-
-                // 检查 URL 路由参数（无论是不是通过 linkOpen 变量）
-                // 只要 urlId 存在，就说明这是一个预设的聊天室，需要自动重连
+            peer.on('open', () => {
                 if (urlId) {
-                    console.log('检测到 URL 中有目标 ID，正在尝试自动恢复连接:'+ urlId + ',和我的语言:' + urlLang);
-                    setRemoteId(urlId);
-                    // 立即加载历史记录 (根据新 Key 格式)
-                    loadHistory(urlId, id);
+                    console.log('检测到url中有目标id，正在尝试连接对方:'+ urlId);
+                    theirPeerIdRef.current = urlId;
+                    const conn = peer.connect(urlId);
+                    connRef.current = conn;
+                    setupConn(conn);
 
-                    // 执行自动重连
-                    connectWithPeerId(urlId, urlLang || myLangRef.current);
-                }else {
-                    console.log('我的语言：' + myLang);
+                    // 在连接打开后再发送init消息
+                    conn.on('open', () => {
+                        console.log('连接成功,加载历史聊天记录');
+                        loadHistory(theirPeerIdRef.current, myPeerIdRef.current);
+                        console.log('连接成功,发送我的信息id:' + myPeerIdRef.current + ",myLang:" + myLangRef.current);
+                        setConnected(true);
+                        conn.send({type: 'init', lang: myLangRef.current, id: myPeerIdRef.current});
+                    });
                 }
-
             });
 
             peer.on('connection', (conn) => {
                 console.log('收到新的连接');
                 connRef.current = conn;
                 setConnected(true);
-                //当有其他客户端连接我们时，我们也需要发送初始化信息
-                conn.send({type: 'init', lang: myLang, id: myId});
                 setupConn(conn);
             });
 
             peer.on('error', (err) => {
-                console.error('Peer.js 错误:', err);
-                // alert('此链接已失效,请重新获取！')
+                console.error('Peerjs错误:', err);
             });
         } catch (error) {
             console.error('Peer.js 初始化失败:', error);
@@ -325,6 +274,7 @@ function ChatRoom() {
 
         return () => {
             if (peerRef.current) {
+                console.log('销毁Peer实例');
                 peerRef.current.destroy();
             }
         };
@@ -332,22 +282,17 @@ function ChatRoom() {
 
     const send = async () => {
         if (!message.trim() || !connRef.current || !connRef.current.open) return;
-        console.log('发送信息:' + message + ',我的语言:' + myLang);
+        console.log('发送信息:' + message + ',我的语言:' + myLangRef.current);
         connRef.current.send({
             type: 'msg',
             text: message,
-            lang: myLang
+            lang: myLangRef.current
         });
-
-
         const newMessage = { text: message, isMine: true };
-
-
-
         setMessages(prev => {
             const updated = [...prev, newMessage];
             // 使用新格式 Key 保存
-            const key = getStorageKey(remoteId, myIdRef.current);
+            const key = getHistoryKey(theirPeerIdRef.current, myPeerIdRef.current);
             if (key) sessionStorage.setItem(key, JSON.stringify(updated));
             return updated;
         });
@@ -359,7 +304,7 @@ function ChatRoom() {
         {!connected && !urlId && !urlLang ? (<div className="max-w-lg mx-auto mt-20 p-8 bg-white rounded-2xl shadow-2xl">
             <h1 className="text-2xl font-bold text-center mb-8">TransChat-跨语言沟通</h1>
             <p className="text-center mb-6 text-lg">
-                <strong className="text-green-600 text-4xl font-bold text-center mb-8">{myId || '加载中...'}</strong><br/>
+                <strong className="text-green-600 text-4xl font-bold text-center mb-8">{myPeerId || '加载中...'}</strong><br/>
             </p>
             <div className="text-sm text-gray-600 mr-3 mb-5 text-center">
                  分享链接给对方即可聊天
@@ -368,7 +313,7 @@ function ChatRoom() {
             <div className="mt-2 flex items-center justify-center mb-5">
                 <input
                     type="text"
-                    value={import.meta.env.VITE_APP_BASE_URL.replace('https://', '') + '/' + myId + '/' + theirLang}
+                    value={import.meta.env.VITE_APP_BASE_URL.replace('https://', '') + '/' + myPeerId + '/' + theirLang}
                     readOnly
                     className="border border-gray-300 rounded px-3 py-1 text-sm bg-gray-50"
                 />
@@ -406,7 +351,6 @@ function ChatRoom() {
                         <option key={code} value={code}>{name}</option>
                     ))}
                 </select>
-
             </div>
 
             <div className="mb-8">
@@ -425,14 +369,8 @@ function ChatRoom() {
 
         </div>) : (<div className="max-w-2xl w-full mx-auto flex flex-col h-screen bg-gray-100">
 
-
-            {/* 顶部栏 - 右上角语言下拉框 */}
             <div className="bg-gray-50 px-4 py-3 text-center  border-b border-gray-200  flex items-center justify-between shadow-sm">
-
-                {/*<h2 className="text-lg font-semibold " >{remoteId}</h2>*/}
-                <h2 className="text-xl font-bold text-black pl-1.5">{remoteId}</h2>
-
-                {/* 语言下拉框（右上角） */}
+                <h2 className="text-xl font-bold text-black pl-1.5"># {urlId}</h2>
                 <div className="relative">
                     <select
                         value={myLang}
@@ -505,5 +443,3 @@ function ChatRoom() {
         </div>)}
     </div>);
 }
-
-export default App;
