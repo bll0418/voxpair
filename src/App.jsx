@@ -69,7 +69,30 @@ const translate = async (text, sourceLang, targetLang) => {
 };
 
 const getPeer = (peerId) => {
-    return new Peer(peerId);
+    return new Peer(peerId, {
+        host: 'peerjs.asktraceai.com',
+        port: 443,
+        secure: true,
+        path: '/',
+        config: {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                {
+                    // 这是一个免费的 TURN 服务器示例 (来自 OpenRelayProject)
+                    urls: 'turn:openrelay.metered.ca:80',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                }
+            ],
+            // 建议强制开启此项以提高移动端稳定性
+            iceTransportPolicy: 'all'
+        }
+    })
 };
 
 // const translate = async (text, sourceLang, targetLang) => {
@@ -246,7 +269,7 @@ function ChatRoom() {
             });
 
             peer.on('connection', (conn) => {
-                console.log('收到新的连接');
+                console.log('收到新的连接，发送初始化信息');
                 connRef.current = conn;
 
                 // 等待连接真正打开后再发送初始化信息
@@ -264,6 +287,7 @@ function ChatRoom() {
 
             peer.on('error', (err) => {
                 console.error('Peerjs错误:', err);
+                alert('连接错误: ' + err.type + '原因: ' + err.message);
             });
 
             peer.on('disconnected', () => {
