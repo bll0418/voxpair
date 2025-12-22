@@ -73,15 +73,7 @@ const getPeer = (peerId) => {
         host: 'peerjs.asktraceai.com',
         port: 443,
         secure: true,
-        path: '/',
-        config: {
-            iceServers: [
-                {urls: 'stun:stun.l.google.com:19302'},
-                {urls: 'stun:stun1.l.google.com:19302'},
-                // 加国内快 STUN（可选）
-                {urls: 'stun:stun.qq.com:3478'}
-            ]
-        }
+        path: '/'
     })
 };
 
@@ -259,7 +251,7 @@ function ChatRoom() {
             });
 
             peer.on('connection', (conn) => {
-                console.log('收到新的连接');
+                console.log('收到新的连接，发送初始化信息');
                 connRef.current = conn;
 
                 // 等待连接真正打开后再发送初始化信息
@@ -269,7 +261,6 @@ function ChatRoom() {
                     conn.send({type: 'init', lang: myLangRef.current, id: myPeerIdRef.current});
                     setupConn(conn);
                 });
-
                 // 添加连接错误处理
                 conn.on('error', (err) => {
                     console.error('连接错误:', err);
@@ -279,16 +270,15 @@ function ChatRoom() {
             peer.on('error', (err) => {
                 console.error('Peerjs错误:', err);
             });
+
+            peer.on('disconnected', () => {
+                console.log('与Peerjs服务器断开，尝试重连...');
+                peer.reconnect();
+            });
         } catch (error) {
             console.error('Peer.js 初始化失败:', error);
         }
 
-        return () => {
-            if (peerRef.current) {
-                console.log('销毁Peer实例');
-                peerRef.current.destroy();
-            }
-        };
     }, []);
 
     const send = async () => {
