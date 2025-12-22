@@ -69,12 +69,7 @@ const translate = async (text, sourceLang, targetLang) => {
 };
 
 const getPeer = (peerId) => {
-    return new Peer(peerId, {
-        host: 'peerjs.asktraceai.com',
-        port: 443,
-        secure: true,
-        path: '/'
-    })
+    return new Peer(peerId);
 };
 
 // const translate = async (text, sourceLang, targetLang) => {
@@ -251,7 +246,7 @@ function ChatRoom() {
             });
 
             peer.on('connection', (conn) => {
-                console.log('收到新的连接，发送初始化信息');
+                console.log('收到新的连接');
                 connRef.current = conn;
 
                 // 等待连接真正打开后再发送初始化信息
