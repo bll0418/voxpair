@@ -199,7 +199,7 @@ function ChatRoom() {
             } else if (data.type === 'msg') {
                 console.log('监听msg数据:'+ data.text +',对方的id:'+ data.from +',对方的语言:', data.lang + ',我的语言:' + myLangRef.current);
                 const translated = await translate(data.text, data.lang, myLangRef.current);
-                const newMessage = { text: translated, original: data.text, from: data.from, isMine: false };
+                const newMessage = { text: translated, original: data.text, from: data.from, isMine: false, time: data.time };
                 setMessages(prev => {
                     const updated = [...prev, newMessage];
                     const key = getHistoryKey(roomId.current);
@@ -223,11 +223,20 @@ function ChatRoom() {
     const send = () => {
         if (message.trim() && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             console.log('发送信息:' + message + ',roomId:' + roomId.current + ',我的语言:' + myLangRef.current);
+
+
+            const timestamp = new Date().getTime();
+            const time = new Date(timestamp).toLocaleTimeString('zh-CN', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
             const msgData = {
                 type: 'msg',
                 from: myPeerIdRef.current,
                 text: message,
-                timestamp: new Date().getTime(),
+                time: time,
                 lang: myLangRef.current
             };
 
@@ -235,7 +244,7 @@ function ChatRoom() {
             wsRef.current.send(JSON.stringify(msgData));
 
 
-            const mySendMessage = {text: message, isMine: true };
+            const mySendMessage = {text: message, isMine: true,time:  time };
 
             setMessages(prev => {
                 const updated = [...prev, mySendMessage];
@@ -326,29 +335,28 @@ function ChatRoom() {
             </div>
 
 
-            {/*<div className="flex-1 overflow-y-auto px-4 py-6">*/}
-            {/*    {messages.map((msg, i) => (*/}
-            {/*    <div key={i} className={`flex mb-4 ${msg.isMine ? 'justify-end' : 'justify-start'}`}>*/}
-            {/*        {!msg.isMine && <img src={theirAvatar} alt="对方" className="w-10 h-10 rounded-full mr-2 self-end"/>}*/}
-            {/*        {!msg.isMine && <p className="text-xs opacity-50 mb-1 whitespace-pre-wrap leading-relaxed">{msg.from}</p>}*/}
-            {/*        <div className={`px-4 py-3 rounded-lg max-w-xs ${msg.isMine ? 'bg-green-500 text-white' : 'bg-white text-black shadow-sm'} border`}>*/}
-            {/*            {!msg.isMine && msg.original && (*/}
-            {/*                <p className="text-xs opacity-50 mb-1 whitespace-pre-wrap leading-relaxed">{originalMessageTip[theirLang]}: {msg.original}</p>*/}
-            {/*            )}*/}
-            {/*            <p className="text-base break-words whitespace-pre-wrap leading-relaxed">{msg.text}</p>*/}
-
-            {/*        </div>*/}
-            {/*        */}
-            {/*        */}
-            {/*        {msg.isMine && <img src={myAvatar} alt="我" className="w-10 h-10 rounded-full ml-2 self-end"/>}*/}
-            {/*    </div>))}*/}
-
-            {/*    <div ref={messagesEndRef}/>*/}
-            {/*</div>*/}
 
             <div className="flex-1 overflow-y-auto px-4 py-6 bg-[#f5f5f5]">
-                {messages.map((msg, i) => (
-                    <div key={i} className={`flex mb-6 ${msg.isMine ? 'justify-end' : 'justify-start'}`}>
+                {messages.map((msg, i) => {
+                    // const showTime = i === 0 || messages[i-1].time !== msg.time;
+                    // const showTime = i === 0 || (msg.time && messages[i - 1]?.time !== msg.time);
+                    // --- 逻辑处理：判断是否显示时间条 ---
+                    // 如果是第一条消息，或者当前消息的时间(分)与上一条不同，则显示居中时间
+                    const currentTime = msg.time?.split(':').slice(0, 2).join(':');
+                    const prevTime = i > 0 ? messages[i - 1].time?.split(':').slice(0, 2).join(':') : null;
+                    const showTime = i === 0 || currentTime !== prevTime;
+                    return (<React.Fragment key={i}>
+                        {/* 1. 时间显示条 */}
+                        {showTime && (
+                            <div className="flex justify-center my-1">
+                                    <span className="text-[12px] text-gray-400 bg-transparent px-2 py-1">
+                                       {msg.time}
+                                    </span>
+                            </div>
+                        )}
+                    <div key={i} className={`flex mb-3 ${msg.isMine ? 'justify-end' : 'justify-start'}`}>
+
+
                         {!msg.isMine && (
                             <div className="flex items-start max-w-[85%]">
                                 <img src={theirAvatar} alt="对方" className="w-10 h-10 rounded-md mr-3 mt-5 object-cover" />
@@ -406,7 +414,9 @@ function ChatRoom() {
                             </div>
                         )}
                     </div>
-                ))}
+                        </React.Fragment>
+                );
+                })}
                 <div ref={messagesEndRef} />
             </div>
 
