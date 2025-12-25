@@ -171,7 +171,7 @@ function ChatRoom() {
         }
 
         // 2. 建立 WebSocket 连接
-        const ws = new WebSocket(`wss://chat-backend-v2.bll0418.workers.dev/?roomId=${roomId.current}`);
+        const ws = new WebSocket(`wss://chatbackend.asktraceai.com?roomId=${roomId.current}`);
         wsRef.current = ws;
 
         ws.onopen = () => {
