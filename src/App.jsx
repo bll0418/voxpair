@@ -1,6 +1,5 @@
 import React, {useState, useEffect, useRef} from 'react';
-import Peer from 'peerjs';
-import { Routes, Route, useParams, useNavigate } from 'react-router-dom';
+import { Routes, Route, useParams } from 'react-router-dom';
 // 然后使用
 const myAvatar = '/assets/1.jpg';
 const theirAvatar = '/assets/2.jpg';
@@ -49,9 +48,9 @@ const getMyPeerId = () => {
 };
 
 //获取聊天记录缓存key
-const getHistoryKey = (targetId, currentId) => {
-    if (!targetId || !currentId) return null;
-    return `chat_history_${targetId}_${currentId}`;
+const getHistoryKey = (roomId) => {
+    if (!roomId) return null;
+    return `chat_history_${roomId}`;
 };
 
 const translate = async (text, sourceLang, targetLang) => {
@@ -68,32 +67,6 @@ const translate = async (text, sourceLang, targetLang) => {
     }
 };
 
-const getPeer = (peerId) => {
-    return new Peer(peerId, {
-        host: 'peerjs.asktraceai.com',
-        port: 443,
-        secure: true,
-        path: '/',
-        config: {
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                {
-                    // 这是一个免费的 TURN 服务器示例 (来自 OpenRelayProject)
-                    urls: 'turn:openrelay.metered.ca:80',
-                    username: 'openrelayproject',
-                    credential: 'openrelayproject'
-                },
-                {
-                    urls: 'turn:openrelay.metered.ca:443',
-                    username: 'openrelayproject',
-                    credential: 'openrelayproject'
-                }
-            ],
-            // 建议强制开启此项以提高移动端稳定性
-            iceTransportPolicy: 'all'
-        }
-    })
-};
 
 // const translate = async (text, sourceLang, targetLang) => {
 //     console.log('正在尝试翻译:' + text + ',源语言:' + sourceLang + ',目标语言:' + targetLang);
@@ -112,7 +85,7 @@ const getPeer = (peerId) => {
 export function App() {
     return (
         <Routes>
-            <Route path="/:urlId/:urlLang" element={<ChatRoom />} />
+            <Route path="/:urlRoomId" element={<ChatRoom />} />
             <Route path="/" element={<ChatRoom />} />
         </Routes>
     );
@@ -120,36 +93,41 @@ export function App() {
 
 
 function ChatRoom() {
-    const {urlId, urlLang } = useParams();
-    const navigate = useNavigate();
+    const {urlRoomId} = useParams();
+
 
     const [myLang, setMyLang] = useState('zh');
-    const [theirLang, setTheirLang] = useState('en');
+
     const [message, setMessage] = useState('');
     const [messages, setMessages] = useState([]);
     const [connected, setConnected] = useState(false);
     const [isCopied, setIsCopied] = useState(false);
 
+    // 在 ChatRoom 组件内
+    const wsRef = useRef(null);
 
-    const peerRef = useRef(null);
-    const connRef = useRef(null);
     const messagesEndRef = useRef(null);
-
 
     //我的id从缓存获取或自动生成
     const myPeerId = getMyPeerId();
     const myPeerIdRef = useRef(myPeerId);
-    const myLangRef = useRef(urlLang || 'zh');
+    const myLangRef = useRef(myLang);
     //对方的id从url中获取
-    const theirPeerIdRef = useRef(urlId);
+    const theirPeerIdRef = useRef(urlRoomId);
     const theirLangRef = useRef('en');
 
+    //房间号默认到url中获取
+    const roomId = useRef(urlRoomId);
+
+
     //加载历史记录
-    const loadHistory = (targetId, currentId) => {
-        const key = getHistoryKey(targetId, currentId);
+    const loadHistory = () => {
+        console.log('开始加载历史记录');
+        const key = getHistoryKey(roomId.current);
         if (key) {
             const saved = sessionStorage.getItem(key);
             if (saved) {
+                setConnected(true) ;
                 const parsed = JSON.parse(saved);
                 console.log(`加载历史记录 [${key}]:`, parsed.length, "条");
                 setMessages(parsed);
@@ -161,9 +139,9 @@ function ChatRoom() {
 
 
     const copyId = async () => {
-        if (!myPeerIdRef.current) return;
+        if (!myPeerIdRef.current)    return;
         try {
-            await navigator.clipboard.writeText(`${import.meta.env.VITE_APP_BASE_URL}/${myPeerIdRef.current}/${theirLang}`);
+            await navigator.clipboard.writeText(`${import.meta.env.VITE_APP_BASE_URL}/${myPeerIdRef.current}`);
             setIsCopied(true);
             setTimeout(() => setIsCopied(false), 2000);
         } catch (e) {
@@ -171,157 +149,109 @@ function ChatRoom() {
         }
     };
 
-
     const changeMyLang = async (newLang) => {
-
         myLangRef.current = newLang
+        setMyLang(newLang);
+
         console.log('change我的语言：' + newLang);
-        if (connRef.current && connected) {
-            connRef.current.send({
-                type: 'lang',
-                lang: newLang
-            });
-        }
+        sessionStorage.setItem('myLang', newLang);
     };
 
-    const setupConn = (conn) => {
-        conn.on('data', async (data) => {
+
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({behavior: 'smooth'});
+    }, [messages,myLang,urlRoomId]);
+
+
+    useEffect(() => {
+        //如果url中没有房间号，就取分享人的peerId即为roomId
+        console.log('我的id：' + myPeerIdRef.current + ',urlRoomId:' + urlRoomId);
+        if(!urlRoomId){
+            roomId.current = myPeerIdRef.current;
+        }
+
+        // 2. 建立 WebSocket 连接
+        const ws = new WebSocket(`wss://chat-backend-v2.bll0418.workers.dev/?roomId=${roomId.current}`);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+            console.log('WebSocket 连接成功,当前的房间号:' + roomId.current);
+            let myLanguage = sessionStorage.getItem('myLang');
+            if (myLanguage) {
+                console.log('从缓存中获取我的语言：' + myLanguage);
+                setMyLang(myLanguage);
+                myLangRef.current = myLanguage;
+            }
+            loadHistory();
+            // 连接成功后可以发送一个init消息，向房间里的所有人,告之自己的语言
+            ws.send(JSON.stringify({ type: 'init', id: myPeerIdRef.current,lang: myLangRef.current }));
+        };
+
+        ws.onmessage = async (event) => {
+            const data = JSON.parse(event.data);
             if (data.type === 'init') {
-                console.log('监听到init数据,加载历史记录，保存对方的id:', data.id + ',对方语言:' + data.lang);
+                console.log('监听init数据,加载历史记录，保存对方的id:', data.id + ',对方语言:' + data.lang);
                 theirPeerIdRef.current = data.id;
                 theirLangRef.current = data.lang;
-                loadHistory(theirPeerIdRef.current, myPeerIdRef.current);
+                loadHistory();
+                setConnected(true);
 
-                if (!urlId) {
-                    console.log('url自动跳转');
-                    navigate(`/${theirPeerIdRef.current}/${myLangRef.current}`, { replace: true });
-                }
-            } else if (data.type === 'lang') {
-                console.log('监听lang数据，保存对方语言:' + data.lang);
-                theirLangRef.current = data.lang;
             } else if (data.type === 'msg') {
-                console.log('监听到msg数据:'+ data.text +',对方的语言:', data.lang + ',我的语言:' + myLangRef.current);
-
+                console.log('监听msg数据:'+ data.text +',对方的id:'+ data.from +',对方的语言:', data.lang + ',我的语言:' + myLangRef.current);
                 const translated = await translate(data.text, data.lang, myLangRef.current);
-                const newMessage = {
-                    text: translated,
-                    original: data.text,
-                    isMine: false
-                };
-
+                const newMessage = { text: translated, original: data.text, from: data.from, isMine: false };
                 setMessages(prev => {
                     const updated = [...prev, newMessage];
-                    // 使用新格式 Key 保存：conn.peer 是对方，myIdRef.current 是自己
-                    const key = getHistoryKey(theirPeerIdRef.current, myPeerIdRef.current);
+                    const key = getHistoryKey(roomId.current);
                     if (key) sessionStorage.setItem(key, JSON.stringify(updated));
                     return updated;
                 });
             }
-        });
+        };
 
-        // 监听连接错误
-        conn.on('error', (err) => {
-            console.error('连接失败:', err);
-        });
-    };
+        ws.onclose = () => {
+            setConnected(false);
+            console.log('WebSocket 已断开');
+        };
 
-    useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({behavior: 'smooth'});
-    }, [messages,myLang,urlId,urlLang]);
+        return () => {
+            if (wsRef.current) wsRef.current.close();
+        };
+    }, [urlRoomId]);
 
-    useEffect(() => {
-        try {
 
-            if (urlId && urlLang) {
-                console.log('通过分享链接打开,获取对方的id:', urlId + ',我的语言:' + urlLang)
-                theirPeerIdRef.current = urlId;
-                myLangRef.current = urlLang;
-                setMyLang(myLangRef.current);
-            }else{
-                console.log('通过主页打开,开始生成我的id');
-            }
+    const send = () => {
+        if (message.trim() && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            console.log('发送信息:' + message + ',roomId:' + roomId.current + ',我的语言:' + myLangRef.current);
+            const msgData = {
+                type: 'msg',
+                from: myPeerIdRef.current,
+                text: message,
+                timestamp: new Date().getTime(),
+                lang: myLangRef.current
+            };
 
-            // if(peerRef.current){
-            //     console.log('peer已存在，不重复创建');
-            //     return;
-            // }
-            const peer =  getPeer(myPeerIdRef.current);
-            peerRef.current = peer;
-            console.log('创建我的Peer实例:', myPeerIdRef.current)
+            // 发送给服务器，服务器会转发给对方
+            wsRef.current.send(JSON.stringify(msgData));
 
-            peer.on('open', () => {
-                if (urlId) {
-                    console.log('检测到url中有目标id，正在尝试连接对方:'+ urlId);
-                    theirPeerIdRef.current = urlId;
-                    const conn = peer.connect(urlId);
-                    connRef.current = conn;
-                    setupConn(conn);
 
-                    // 在连接打开后再发送init消息
-                    conn.on('open', () => {
-                        console.log('连接成功,加载历史聊天记录');
-                        loadHistory(theirPeerIdRef.current, myPeerIdRef.current);
-                        console.log('连接成功,发送我的信息id:' + myPeerIdRef.current + ",myLang:" + myLangRef.current);
-                        setConnected(true);
-                        conn.send({type: 'init', lang: myLangRef.current, id: myPeerIdRef.current});
-                    });
-                }
+            const mySendMessage = {text: message, isMine: true };
+
+            setMessages(prev => {
+                const updated = [...prev, mySendMessage];
+                const key = getHistoryKey(roomId.current);
+                if (key) sessionStorage.setItem(key, JSON.stringify(updated));
+                // 清空输入框
+                setMessage("");
+                return updated;
             });
 
-            peer.on('connection', (conn) => {
-                console.log('收到新的连接，发送初始化信息');
-                connRef.current = conn;
-
-                // 等待连接真正打开后再发送初始化信息
-                conn.on('open', () => {
-                    console.log('连接已打开，发送初始化信息');
-                    setConnected(true);
-                    conn.send({type: 'init', lang: myLangRef.current, id: myPeerIdRef.current});
-                    setupConn(conn);
-                });
-                // 添加连接错误处理
-                conn.on('error', (err) => {
-                    console.error('连接错误:', err);
-                });
-            });
-
-            peer.on('error', (err) => {
-                console.error('Peerjs错误:', err);
-                alert('连接错误: ' + err.type + '原因: ' + err.message);
-            });
-
-            peer.on('disconnected', () => {
-                console.log('与Peerjs服务器断开，尝试重连...');
-                peer.reconnect();
-            });
-        } catch (error) {
-            console.error('Peer.js 初始化失败:', error);
         }
-
-    }, []);
-
-    const send = async () => {
-        if (!message.trim() || !connRef.current || !connRef.current.open) return;
-        console.log('发送信息:' + message + ',我的语言:' + myLangRef.current);
-        connRef.current.send({
-            type: 'msg',
-            text: message,
-            lang: myLangRef.current
-        });
-        const newMessage = { text: message, isMine: true };
-        setMessages(prev => {
-            const updated = [...prev, newMessage];
-            // 使用新格式 Key 保存
-            const key = getHistoryKey(theirPeerIdRef.current, myPeerIdRef.current);
-            if (key) sessionStorage.setItem(key, JSON.stringify(updated));
-            return updated;
-        });
-        setMessage('');
     };
 
 
     return (<div className="min-h-screen bg-gray-100 flex flex-col">
-        {!connected && !urlId && !urlLang ? (<div className="max-w-lg mx-auto mt-20 p-8 bg-white rounded-2xl shadow-2xl">
+        {!connected && !urlRoomId ? (<div className="max-w-lg mx-auto mt-20 p-8 bg-white rounded-2xl shadow-2xl">
             <h1 className="text-2xl font-bold text-center mb-8">TransChat-跨语言沟通</h1>
             <p className="text-center mb-6 text-lg">
                 <strong className="text-green-600 text-4xl font-bold text-center mb-8">{myPeerId || '加载中...'}</strong><br/>
@@ -333,7 +263,7 @@ function ChatRoom() {
             <div className="mt-2 flex items-center justify-center mb-5">
                 <input
                     type="text"
-                    value={import.meta.env.VITE_APP_BASE_URL.replace('https://', '') + '/' + myPeerId + '/' + theirLang}
+                    value={import.meta.env.VITE_APP_BASE_URL.replace('https://', '') + '/' + myPeerId}
                     readOnly
                     className="border border-gray-300 rounded px-3 py-1 text-sm bg-gray-50"
                 />
@@ -359,8 +289,7 @@ function ChatRoom() {
                 </button>
             </div>
 
-
-            <div className="mb-8">
+            <div className="mb-8 mt-10">
                 <label className="block text-lg font-medium mb-3">我的语言</label>
                 <select
                     className="w-full border-2 border-gray-300 rounded-xl px-5 py-4 text-lg bg-white focus:ring-2 focus:ring-green-500 focus:border-transparent appearance-none"
@@ -373,24 +302,10 @@ function ChatRoom() {
                 </select>
             </div>
 
-            <div className="mb-8">
-                <label className="block text-lg font-medium mb-3">对方语言</label>
-                <select
-                    className="w-full border-2 border-gray-300 rounded-xl px-5 py-4 text-lg bg-white focus:ring-2 focus:ring-green-500 focus:border-transparent appearance-none"
-                    value={theirLang}
-                    onChange={e => setTheirLang(e.target.value)}
-                >
-                    {Object.entries(languages).map(([code, name]) => (
-                        <option key={code} value={code}>{name}</option>
-                    ))}
-                </select>
-
-            </div>
-
         </div>) : (<div className="max-w-2xl w-full mx-auto flex flex-col h-screen bg-gray-100">
 
             <div className="bg-gray-50 px-4 py-3 text-center  border-b border-gray-200  flex items-center justify-between shadow-sm">
-                <h2 className="text-xl font-bold text-black pl-1.5"># {urlId}</h2>
+                <h2 className="text-xl font-bold text-black pl-1.5"># {roomId.current}</h2>
                 <div className="relative">
                     <select
                         value={myLang}
@@ -411,28 +326,88 @@ function ChatRoom() {
             </div>
 
 
-            <div className="flex-1 overflow-y-auto px-4 py-6">
+            {/*<div className="flex-1 overflow-y-auto px-4 py-6">*/}
+            {/*    {messages.map((msg, i) => (*/}
+            {/*    <div key={i} className={`flex mb-4 ${msg.isMine ? 'justify-end' : 'justify-start'}`}>*/}
+            {/*        {!msg.isMine && <img src={theirAvatar} alt="对方" className="w-10 h-10 rounded-full mr-2 self-end"/>}*/}
+            {/*        {!msg.isMine && <p className="text-xs opacity-50 mb-1 whitespace-pre-wrap leading-relaxed">{msg.from}</p>}*/}
+            {/*        <div className={`px-4 py-3 rounded-lg max-w-xs ${msg.isMine ? 'bg-green-500 text-white' : 'bg-white text-black shadow-sm'} border`}>*/}
+            {/*            {!msg.isMine && msg.original && (*/}
+            {/*                <p className="text-xs opacity-50 mb-1 whitespace-pre-wrap leading-relaxed">{originalMessageTip[theirLang]}: {msg.original}</p>*/}
+            {/*            )}*/}
+            {/*            <p className="text-base break-words whitespace-pre-wrap leading-relaxed">{msg.text}</p>*/}
+
+            {/*        </div>*/}
+            {/*        */}
+            {/*        */}
+            {/*        {msg.isMine && <img src={myAvatar} alt="我" className="w-10 h-10 rounded-full ml-2 self-end"/>}*/}
+            {/*    </div>))}*/}
+
+            {/*    <div ref={messagesEndRef}/>*/}
+            {/*</div>*/}
+
+            <div className="flex-1 overflow-y-auto px-4 py-6 bg-[#f5f5f5]">
                 {messages.map((msg, i) => (
-                    <div key={i} className={`flex mb-4 ${msg.isMine ? 'justify-end' : 'justify-start'}`}>
-                        {!msg.isMine &&
-                            <img src={theirAvatar} alt="对方" className="w-10 h-10 rounded-full mr-2 self-end"/>}
+                    <div key={i} className={`flex mb-6 ${msg.isMine ? 'justify-end' : 'justify-start'}`}>
+                        {!msg.isMine && (
+                            <div className="flex items-start max-w-[85%]">
+                                <img src={theirAvatar} alt="对方" className="w-10 h-10 rounded-md mr-3 mt-5 object-cover" />
+                                <div className="flex flex-col">
+                                    {/* PeerID 放在消息上方，颜色淡化 */}
+                                    <span className="text-[11px] text-gray-400 mb-1 ml-0.5">{msg.from}</span>
 
-                        <div
-                            className={`px-4 py-3 rounded-lg max-w-xs ${msg.isMine ? 'bg-green-500 text-white' : 'bg-white text-black shadow-sm'} border`}>
-                            {/* 对方消息：显示原文小字 + 翻译后主文本 */}
-                            {!msg.isMine && msg.original && (
-                                <p className="text-xs opacity-50 mb-1 whitespace-pre-wrap leading-relaxed">{originalMessageTip[theirLang]}: {msg.original}</p>
-                            )}
+                                    {/* 气泡容器 */}
+                                    <div className="relative bg-white text-black px-3 py-2.5 rounded-md shadow-sm border border-[#e5e5e5]">
+                                        {/* 尖角：通过绝对定位放在顶部下方一点点 */}
+                                        <div className="absolute top-[14px] -left-[6px] w-0 h-0
+                                border-t-[6px] border-t-transparent
+                                border-r-[6px] border-r-white
+                                border-b-[6px] border-b-transparent">
+                                        </div>
+                                        {/* 尖角边框（可选，为了配合 border 效果） */}
+                                        <div className="absolute top-[14px] -left-[7px] w-0 h-0 -z-10
+                                border-t-[6px] border-t-transparent
+                                border-r-[6px] border-r-[#e5e5e5]
+                                border-b-[6px] border-b-transparent">
+                                        </div>
 
-                            {/* 主文本：自己发原始，对方发翻译后 */}
-                            <p className="text-base break-words whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                                        {msg.original && (
+                                            <p className="text-[11px] text-gray-400 mb-1 pb-1 border-b border-gray-50">
+                                                {originalMessageTip[myLang]}: {msg.original}
+                                            </p>
+                                        )}
+                                        <p className="text-[15px] break-words whitespace-pre-wrap leading-snug">
+                                            {msg.text}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
 
-                        </div>
+                        {/* 我的消息布局 */}
+                        {msg.isMine && (
+                            <div className="flex items-start max-w-[85%] justify-end">
+                                <div className="flex flex-col items-end">
+                                    <div className="relative bg-[#95ec69] text-black px-3 py-2.5 rounded-md shadow-sm border border-[#82d65c]">
+                                        {/* 右侧尖角 */}
+                                        <div className="absolute top-[14px] -right-[5px] w-0 h-0
+                                border-t-[6px] border-t-transparent
+                                border-l-[6px] border-l-[#95ec69]
+                                border-b-[6px] border-b-transparent">
+                                        </div>
 
-                        {msg.isMine && <img src={myAvatar} alt="我" className="w-10 h-10 rounded-full ml-2 self-end"/>}
-                    </div>))}
-
-                <div ref={messagesEndRef}/>
+                                        <p className="text-[15px] break-words whitespace-pre-wrap leading-snug">
+                                            {msg.text}
+                                        </p>
+                                    </div>
+                                </div>
+                                {/* 我的头像 */}
+                                <img src={myAvatar} alt="我" className="w-10 h-10 rounded-md ml-3 object-cover" />
+                            </div>
+                        )}
+                    </div>
+                ))}
+                <div ref={messagesEndRef} />
             </div>
 
             <div className="bg-gray-50 border border-gray-200 p-3 flex items-center mb-3">
