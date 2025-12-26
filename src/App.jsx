@@ -1,8 +1,35 @@
 import React, {useState, useEffect, useRef} from 'react';
 import { Routes, Route, useParams } from 'react-router-dom';
-// 然后使用
-const myAvatar = '/assets/1.jpg';
-const theirAvatar = '/assets/2.jpg';
+
+const theirAvatar = '/assets/avatar/2.jpg';
+
+// 1. 定义头像列表
+const AVATAR_LIST = [
+    '/assets/avatar/1.jpg',
+    '/assets/avatar/2.jpg',
+    '/assets/avatar/3.jpg',
+    '/assets/avatar/4.jpg',
+    '/assets/avatar/5.jpg',
+    '/assets/avatar/6.jpg',
+    '/assets/avatar/7.jpg',
+    '/assets/avatar/8.jpg',
+    '/assets/avatar/9.jpg',
+    '/assets/avatar/10.jpg',
+    '/assets/avatar/11.jpg',
+    '/assets/avatar/12.jpg',
+    '/assets/avatar/13.jpg',
+    '/assets/avatar/14.jpg',
+    '/assets/avatar/15.jpg',
+    '/assets/avatar/16.jpg',
+    '/assets/avatar/17.jpg',
+    '/assets/avatar/18.jpg',
+    '/assets/avatar/19.jpg',
+    '/assets/avatar/20.jpg',
+    '/assets/avatar/21.jpg',
+    '/assets/avatar/22.jpg',
+    '/assets/avatar/23.jpg',
+    '/assets/avatar/24.jpg'
+];
 
 const languages = {
     zh: '中文',
@@ -94,7 +121,16 @@ export function App() {
 
 function ChatRoom() {
     const {urlRoomId} = useParams();
-
+    // 2. 初始化我的头像状态 (从缓存读取或默认选第一个)
+    const [myAvatar, setMyAvatar] = useState(() => {
+        const savedIndex = sessionStorage.getItem('myAvatar');
+        // 如果缓存中存在头像编号且有效，则使用对应头像，否则使用默认头像
+        if (savedIndex && !isNaN(parseInt(savedIndex)) && AVATAR_LIST[parseInt(savedIndex)]) {
+            return AVATAR_LIST[parseInt(savedIndex)];
+        }
+        return AVATAR_LIST[0];
+    });
+    const [showAvatarPicker, setShowAvatarPicker] = useState(false); // 控制弹窗显隐
 
     const [myLang, setMyLang] = useState('zh');
 
@@ -118,6 +154,17 @@ function ChatRoom() {
 
     //房间号默认到url中获取
     const roomId = useRef(urlRoomId);
+
+    // 3. 更换头像的处理函数
+    const changeAvatar = (newAvatar) => {
+        // 将头像编号存储到缓存，而不是完整路径
+        const avatarIndex = AVATAR_LIST.indexOf(newAvatar);
+        if (avatarIndex !== -1) {
+            sessionStorage.setItem('myAvatar', avatarIndex.toString());
+            setShowAvatarPicker(false);
+            setMyAvatar(newAvatar);
+        }
+    };
 
 
     //加载历史记录
@@ -199,7 +246,7 @@ function ChatRoom() {
             } else if (data.type === 'msg') {
                 console.log('监听msg数据:'+ data.text +',对方的id:'+ data.from +',对方的语言:', data.lang + ',我的语言:' + myLangRef.current);
                 const translated = await translate(data.text, data.lang, myLangRef.current);
-                const newMessage = { text: translated, original: data.text, from: data.from, isMine: false, time: data.time };
+                const newMessage = { text: translated, original: data.text, from: data.from, isMine: false, time: data.time,avatar: data.avatar };
                 setMessages(prev => {
                     const updated = [...prev, newMessage];
                     const key = getHistoryKey(roomId.current);
@@ -223,10 +270,7 @@ function ChatRoom() {
     const send = () => {
         if (message.trim() && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             console.log('发送信息:' + message + ',roomId:' + roomId.current + ',我的语言:' + myLangRef.current);
-
-
-            const timestamp = new Date().getTime();
-            const time = new Date(timestamp).toLocaleTimeString('zh-CN', {
+            const time = new Date().toLocaleTimeString('zh-CN', {
                 hour12: false,
                 hour: '2-digit',
                 minute: '2-digit',
@@ -237,7 +281,8 @@ function ChatRoom() {
                 from: myPeerIdRef.current,
                 text: message,
                 time: time,
-                lang: myLangRef.current
+                lang: myLangRef.current,
+                avatar:AVATAR_LIST.indexOf(myAvatar)
             };
 
             // 发送给服务器，服务器会转发给对方
@@ -260,6 +305,31 @@ function ChatRoom() {
 
 
     return (<div className="min-h-screen bg-gray-100 flex flex-col">
+        {/* 4. 头像选择弹窗 (Portal 效果) */}
+        {showAvatarPicker && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={() => setShowAvatarPicker(false)}>
+                <div className="bg-white p-6 rounded-2xl shadow-xl max-w-xs w-full" onClick={e => e.stopPropagation()}>
+                    <h3 className="text-lg font-bold mb-4 text-center">选择新头像</h3>
+                    <div className="grid grid-cols-3 gap-4">
+                        {AVATAR_LIST.map((src, idx) => (
+                            <img
+                                key={idx}
+                                src={src}
+                                alt="avatar-option"
+                                className={`w-16 h-16 rounded-lg cursor-pointer border-4 transition-all ${myAvatar === src ? 'border-green-500 scale-110' : 'border-transparent hover:border-gray-200'}`}
+                                onClick={() => changeAvatar(src)}
+                            />
+                        ))}
+                    </div>
+                    <button
+                        className="w-full mt-6 py-2 bg-gray-100 rounded-lg font-medium"
+                        onClick={() => setShowAvatarPicker(false)}
+                    >
+                        取消
+                    </button>
+                </div>
+            </div>
+        )}
         {!connected && !urlRoomId ? (<div className="max-w-lg mx-auto mt-20 p-8 bg-white rounded-2xl shadow-2xl">
             <h1 className="text-2xl font-bold text-center mb-8">TransChat-跨语言沟通</h1>
             <p className="text-center mb-6 text-lg">
@@ -359,7 +429,8 @@ function ChatRoom() {
 
                         {!msg.isMine && (
                             <div className="flex items-start max-w-[85%]">
-                                <img src={theirAvatar} alt="对方" className="w-10 h-10 rounded-md mr-3 mt-5 object-cover" />
+                                {/*<img src={theirAvatar} alt="对方" className="w-10 h-10 rounded-md mr-3 mt-5 object-cover" />*/}
+                                <img src={AVATAR_LIST[parseInt(msg.avatar)]} alt="对方" className="w-10 h-10 rounded-md mr-3 mt-5 object-cover" />
                                 <div className="flex flex-col">
                                     {/* PeerID 放在消息上方，颜色淡化 */}
                                     <span className="text-[11px] text-gray-400 mb-1 ml-0.5">{msg.from}</span>
@@ -409,10 +480,18 @@ function ChatRoom() {
                                         </p>
                                     </div>
                                 </div>
-                                {/* 我的头像 */}
-                                <img src={myAvatar} alt="我" className="w-10 h-10 rounded-md ml-3 object-cover" />
+                                {/* 点击我的头像 */}
+                                <img
+                                    src={myAvatar}
+                                    alt="我"
+                                    className="w-10 h-10 rounded-md ml-3 object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                                    onClick={() => setShowAvatarPicker(true)}
+                                    title="点击更换头像"
+                                />
                             </div>
                         )}
+
+
                     </div>
                         </React.Fragment>
                 );
