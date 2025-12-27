@@ -129,7 +129,6 @@ function ChatRoom() {
         }
         return AVATAR_LIST[Math.floor(Math.random() * AVATAR_LIST.length)];
     });
-    const [showAvatarPicker, setShowAvatarPicker] = useState(false); // 控制弹窗显隐
 
     const [myLang, setMyLang] = useState('zh');
 
@@ -154,26 +153,32 @@ function ChatRoom() {
     //房间号默认到url中获取
     const roomId = useRef(urlRoomId);
 
-    // 在 ChatRoom 组件内部顶部添加
-    const [activeTab, setActiveTab] = useState('avatar'); // 'avatar' 或 'nickname'
+
     const [myNickname, setMyNickname] = useState(() => {
         return sessionStorage.getItem('myNickname') || myPeerId; // 默认使用 PeerID
     });
-    const [tempNickname, setTempNickname] = useState(myNickname); // 弹窗内输入框的临时状态
 
-// 更新昵称的处理函数
-    const updateNickname = () => {
-        // 微信风格正则：支持中英文、数字、下划线、减号，1-20位
-        const regex = /^[\u4e00-\u9fa5a-zA-Z0-9_-]{1,20}$/;
-        if (!regex.test(tempNickname)) {
-            alert("昵称长度为1-20位，支持中文、字母、数字、下划线或减号");
-            return;
+    const [activeView, setActiveView] = useState('main');
+    const [isEditingName, setIsEditingName] = useState(false);
+    const [tempNickname, setTempNickname] = useState(myNickname);
+    const [showAvatarPicker, setShowAvatarPicker] = useState(false); // 控制弹窗显隐
+
+    // 在组件顶部添加
+    const [viewingUser, setViewingUser] = useState(null); // 存储 { id, nickname, avatar }
+
+// 2. 处理昵称保存的快捷函数 (回车触发)
+    const handleNicknameSubmit = (e) => {
+        if (e.key === 'Enter') {
+            const regex = /^[\p{L}\p{N}_-]{1,20}$/u;
+            if (!regex.test(tempNickname)) {
+                alert("昵称需为1-20位，支持所有语言文字、数字、下划线或减号");
+                return;
+            }
+            setMyNickname(tempNickname);
+            sessionStorage.setItem('myNickname', tempNickname);
+            setIsEditingName(false);
         }
-        setMyNickname(tempNickname);
-        sessionStorage.setItem('myNickname', tempNickname);
-        setShowAvatarPicker(false); // 关闭弹窗
     };
-
 
     // 3. 更换头像的处理函数
     const changeAvatar = (newAvatar) => {
@@ -181,17 +186,16 @@ function ChatRoom() {
         const avatarIndex = AVATAR_LIST.indexOf(newAvatar);
         if (avatarIndex !== -1) {
             sessionStorage.setItem('myAvatar', avatarIndex.toString());
-            setShowAvatarPicker(false);
             setMyAvatar(newAvatar);
+            setActiveView('main');
         }
     };
 
 
     //加载历史记录
     const loadHistory = () => {
-        logger('开始加载历史记录');
-        logger('开始加载历史记录')
         const key = getHistoryKey(roomId.current);
+        logger('开始加载历史记录key:' + key);
         if (key) {
             const saved = sessionStorage.getItem(key);
             if (saved) {
@@ -232,10 +236,17 @@ function ChatRoom() {
 
 
     useEffect(() => {
+        // 防止重复连接的清理标记
+        let isComponentMounted = true;
         //如果url中没有房间号，就取分享人的peerId即为roomId
         logger('我的id：' + myPeerIdRef.current + ',urlRoomId:' + urlRoomId);
         if(!urlRoomId){
             roomId.current = myPeerIdRef.current;
+        }
+
+        // 如果已经有连接且是开启状态，先关闭它
+        if (wsRef.current) {
+            wsRef.current.close();
         }
 
         // 2. 建立 WebSocket 连接
@@ -243,6 +254,9 @@ function ChatRoom() {
         wsRef.current = ws;
 
         ws.onopen = () => {
+            // 只有当组件还没卸载时才执行逻辑
+            if (!isComponentMounted) return;
+
             logger('WebSocket 连接成功,当前的房间号:' + roomId.current);
             let myLanguage = sessionStorage.getItem('myLang');
             if (myLanguage) {
@@ -251,11 +265,17 @@ function ChatRoom() {
                 myLangRef.current = myLanguage;
             }
             loadHistory();
-            // 连接成功后可以发送一个init消息，向房间里的所有人,告之自己的语言
-            ws.send(JSON.stringify({ type: 'init', id: myPeerIdRef.current,lang: myLangRef.current }));
+
+            // 确保状态为 OPEN 时再发送数据
+            if (ws.readyState === WebSocket.OPEN) {
+                // 连接成功后可以发送一个init消息，向房间里的所有人,告之自己的语言
+                ws.send(JSON.stringify({ type: 'init', id: myPeerIdRef.current,lang: myLangRef.current }));
+            }
+
         };
 
         ws.onmessage = async (event) => {
+            if (!isComponentMounted) return;
             const data = JSON.parse(event.data);
             if (data.type === 'init') {
                 logger('监听init数据,加载历史记录，保存对方的id:', data.id + ',对方语言:' + data.lang);
@@ -279,13 +299,25 @@ function ChatRoom() {
         };
 
         ws.onclose = () => {
-            setConnected(false);
-            logger('WebSocket 已断开');
+            if (isComponentMounted) {
+                setConnected(false);
+                logger('WebSocket 已断开');
+            }
+
+        };
+        ws.onerror = (error) => {
+            logger('WebSocket 发生错误',error);
         };
 
+        // 清理函数：在组件卸载或重新执行时执行
         return () => {
-            if (wsRef.current) wsRef.current.close();
+            isComponentMounted = false;
+            if (wsRef.current) {
+                wsRef.current.close();
+                wsRef.current = null;
+            }
         };
+
     }, [urlRoomId]);
 
 
@@ -329,93 +361,74 @@ function ChatRoom() {
 
 
     return (<div className="min-h-screen bg-gray-100 flex flex-col">
-        {/*/!* 4. 头像选择弹窗 (Portal 效果) *!/*/}
-        {/*{showAvatarPicker && (*/}
-        {/*    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={() => setShowAvatarPicker(false)}>*/}
-        {/*        <div className="bg-white p-6 rounded-2xl shadow-xl max-w-xs w-full" onClick={e => e.stopPropagation()}>*/}
-        {/*            <h3 className="text-lg font-bold mb-4 text-center">选择新头像</h3>*/}
-        {/*            <div className="grid grid-cols-3 gap-4">*/}
-        {/*                {AVATAR_LIST.map((src, idx) => (*/}
-        {/*                    <img*/}
-        {/*                        key={idx}*/}
-        {/*                        src={src}*/}
-        {/*                        alt="avatar-option"*/}
-        {/*                        className={`w-16 h-16 rounded-lg cursor-pointer border-4 transition-all ${myAvatar === src ? 'border-green-500 scale-110' : 'border-transparent hover:border-gray-200'}`}*/}
-        {/*                        onClick={() => changeAvatar(src)}*/}
-        {/*                    />*/}
-        {/*                ))}*/}
-        {/*            </div>*/}
-        {/*            <button*/}
-        {/*                className="w-full mt-6 py-2 bg-gray-100 rounded-lg font-medium"*/}
-        {/*                onClick={() => setShowAvatarPicker(false)}*/}
-        {/*            >*/}
-        {/*                取消*/}
-        {/*            </button>*/}
-        {/*        </div>*/}
-        {/*    </div>*/}
-        {/*)}*/}
+
         {showAvatarPicker && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={() => setShowAvatarPicker(false)}>
-                <div className="bg-white rounded-2xl shadow-xl max-w-xs w-full overflow-hidden" onClick={e => e.stopPropagation()}>
-                    {/* Tab 头部 */}
-                    <div className="flex border-b">
-                        <button
-                            className={`flex-1 py-4 text-sm font-bold ${activeTab === 'avatar' ? 'text-green-600 border-b-2 border-green-600' : 'text-gray-500'}`}
-                            onClick={() => setActiveTab('avatar')}
-                        >
-                            更换头像
-                        </button>
-                        <button
-                            className={`flex-1 py-4 text-sm font-bold ${activeTab === 'nickname' ? 'text-green-600 border-b-2 border-green-600' : 'text-gray-500'}`}
-                            onClick={() => setActiveTab('nickname')}
-                        >
-                            修改昵称
-                        </button>
-                    </div>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 transition-opacity"
+                 onClick={() => { setShowAvatarPicker(false); setActiveView('main'); setViewingUser(null); }}>
 
-                    <div className="p-6">
-                        {activeTab === 'avatar' ? (
-                            /* 头像列表页 */
-                            <div className="grid grid-cols-3 gap-4">
-                                {AVATAR_LIST.map((src, idx) => (
-                                    <img
-                                        key={idx}
-                                        src={src}
-                                        className={`w-16 h-16 rounded-lg cursor-pointer border-4 transition-all ${myAvatar === src ? 'border-green-500 scale-105' : 'border-transparent'}`}
-                                        onClick={() => changeAvatar(src)}
-                                    />
-                                ))}
+                {/* 固定尺寸容器 320x400 */}
+                <div className="bg-white rounded-3xl shadow-2xl w-80 h-[400px] overflow-hidden flex flex-col relative" onClick={e => e.stopPropagation()}>
+
+                    {/* 右上角关闭图标 (统一存在) */}
+                    <button
+                        onClick={() => { setShowAvatarPicker(false); setActiveView('main'); setViewingUser(null); }}
+                        className="absolute top-4 right-4 z-20 p-1 rounded-full text-gray-300 hover:text-gray-500 hover:bg-gray-100 transition-all"
+                    >
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+
+                    {/* 情况 A：查看他人资料 */}
+                    {viewingUser ? (
+                        <div className="flex-1 flex flex-col items-center justify-center p-8">
+                            <img src={AVATAR_LIST[viewingUser.avatar]} className="w-28 h-28 rounded-3xl shadow-lg border-4 border-gray-50 object-cover" alt="Avatar" />
+                            <div className="mt-8 flex flex-col items-center">
+                                <h3 className="text-2xl font-bold text-gray-800 truncate max-w-[240px]">{viewingUser.nickname}</h3>
+                                <p className="text-gray-300 text-[11px] mt-4 tracking-widest ">ID: {viewingUser.id}</p>
                             </div>
-                        ) : (
-                            /* 昵称设置页 */
-                            <div className="flex flex-col">
-                                <input
-                                    type="text"
-                                    value={tempNickname}
-                                    onChange={(e) => setTempNickname(e.target.value)}
-                                    placeholder="请输入昵称"
-                                    className="w-full border-b-2 border-gray-200 focus:border-green-500 outline-none py-2 text-lg mb-6"
-                                    autoFocus
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter' ) {
-                                            updateNickname();
-                                        }
-                                    }}
-                                />
-                                <button
-                                    onClick={updateNickname}
-                                    className="w-full bg-green-500 text-white py-3 rounded-xl font-bold hover:bg-green-600 transition-colors"
-
-                                >
-                                    保存修改
-                                </button>
-                            </div>
-                        )}
-
-                        <button className="w-full mt-4 py-2 text-gray-400 text-sm" onClick={() => setShowAvatarPicker(false)}>
-                            取消
-                        </button>
-                    </div>
+                        </div>
+                    ) : (
+                        /* 情况 B：我自己的资料 (原有逻辑) */
+                        <>
+                            {activeView === 'main' ? (
+                                <div className="flex-1 flex flex-col items-center justify-center p-8">
+                                    <div className="relative group cursor-pointer" onClick={() => setActiveView('avatar')}>
+                                        <img src={myAvatar} className="w-28 h-28 rounded-3xl shadow-lg border-4 border-gray-50 object-cover" alt="Avatar" />
+                                        <div className="absolute inset-0 bg-black/40 rounded-3xl opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all text-white text-xs font-medium">更换头像</div>
+                                    </div>
+                                    <div className="mt-8 w-full flex flex-col items-center min-h-[100px]">
+                                        {!isEditingName ? (
+                                            <div className="group cursor-pointer flex items-center gap-2" onClick={() => { setTempNickname(myNickname); setIsEditingName(true); }}>
+                                                <h3 className="text-2xl font-bold text-gray-800 truncate max-w-[200px]">{myNickname}</h3>
+                                                <svg className="w-4 h-4 text-gray-300 group-hover:text-green-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                            </div>
+                                        ) : (
+                                            <input autoFocus className="w-full border-b-2 border-green-500 outline-none py-1 text-center text-xl font-bold bg-transparent" value={tempNickname} onChange={e => setTempNickname(e.target.value)} onKeyDown={handleNicknameSubmit} onBlur={() => setIsEditingName(false)} />
+                                        )}
+                                        <p className="text-gray-300 text-[11px] mt-4 tracking-widest ">ID: {myPeerId}</p>
+                                    </div>
+                                </div>
+                            ) : (
+                                /* 头像选择页 (原有逻辑) */
+                                <div className="flex flex-col h-full">
+                                    <div className="p-4 border-b border-gray-50 flex items-center bg-gray-50/30">
+                                        <button onClick={() => setActiveView('main')} className="p-1 hover:bg-white rounded-full transition-shadow shadow-sm">
+                                            <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                        </button>
+                                        <h3 className="flex-1 text-center font-bold text-gray-700 mr-8">选择新头像</h3>
+                                    </div>
+                                    <div className="flex-1 overflow-y-auto p-5 scrollbar-thin">
+                                        <div className="grid grid-cols-3 gap-3">
+                                            {AVATAR_LIST.map((src, idx) => (
+                                                <img key={idx} src={src} className={`w-full aspect-square rounded-2xl cursor-pointer border-[3px] transition-all object-cover ${myAvatar === src ? 'border-green-500 scale-105' : 'border-transparent opacity-80 hover:opacity-100'}`} onClick={() => { changeAvatar(src); setActiveView('main'); }} />
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </>
+                    )}
                 </div>
             </div>
         )}
@@ -520,7 +533,20 @@ function ChatRoom() {
 
                         {!msg.isMine && (
                             <div className="flex items-start max-w-[85%]">
-                                <img src={AVATAR_LIST[parseInt(msg.avatar)]} alt="对方" className="w-10 h-10 rounded-md mr-3 mt-5 object-cover" />
+                                <img
+                                    src={AVATAR_LIST[parseInt(msg.avatar)]}
+                                    alt="对方"
+                                    className="w-10 h-10 rounded-md mr-3 mt-5 object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                                    onClick={() => {
+                                        // 设置要查看的用户信息
+                                        setViewingUser({
+                                            id: msg.from,
+                                            nickname: msg.nickname,
+                                            avatar: msg.avatar
+                                        });
+                                        setShowAvatarPicker(true);
+                                    }}
+                                />
                                 <div className="flex flex-col">
                                     {/* PeerID 放在消息上方，颜色淡化 */}
                                     <span className="text-[11px] text-gray-400 mb-1 ml-0.5">{msg.nickname || msg.from}</span>
