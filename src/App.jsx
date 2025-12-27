@@ -1,8 +1,6 @@
 import React, {useState, useEffect, useRef} from 'react';
 import { Routes, Route, useParams } from 'react-router-dom';
 
-const theirAvatar = '/assets/avatar/2.jpg';
-
 // 1. 定义头像列表
 const AVATAR_LIST = [
     '/assets/avatar/1.jpg',
@@ -22,13 +20,7 @@ const AVATAR_LIST = [
     '/assets/avatar/15.jpg',
     '/assets/avatar/16.jpg',
     '/assets/avatar/17.jpg',
-    '/assets/avatar/18.jpg',
-    '/assets/avatar/19.jpg',
-    '/assets/avatar/20.jpg',
-    '/assets/avatar/21.jpg',
-    '/assets/avatar/22.jpg',
-    '/assets/avatar/23.jpg',
-    '/assets/avatar/24.jpg'
+    '/assets/avatar/18.jpg'
 ];
 
 const languages = {
@@ -54,6 +46,13 @@ const inputMessagePlaceholder = {
     ja: 'メッセージを入力してください...',
 };
 
+
+// 为日志添加时间戳的辅助函数
+const logger = (message) => {
+    const timestamp = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    console.log(`[${timestamp}] ${message}`);
+};
+
 //用户id:4位字母 + 3位数字
 const generateUsername = () => {
     const s = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -65,11 +64,11 @@ const generateUsername = () => {
 //获取我的id,先从sessionStorage中获取
 const getMyPeerId = () => {
     let myPeerId = sessionStorage.getItem('myPeerId');
-   //console.log('从sessionStorage获取的myPeerId:', myPeerId);
+   //logger('从sessionStorage获取的myPeerId:', myPeerId);
     if (!myPeerId) {
         myPeerId = generateUsername();
         sessionStorage.setItem('myPeerId', myPeerId);
-        console.log('生成新的myPeerId:', myPeerId);
+        logger('生成新的myPeerId:', myPeerId);
     }
     return myPeerId;
 };
@@ -81,8 +80,8 @@ const getHistoryKey = (roomId) => {
 };
 
 const translate = async (text, sourceLang, targetLang) => {
-    console.log('正在尝试翻译:' + text + ',源语言:' + sourceLang + ',目标语言:' + targetLang);
     if (sourceLang === targetLang || !text.trim()) return text;
+    logger('正在尝试翻译:' + text + ',源语言:' + sourceLang + ',目标语言:' + targetLang);
     const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLang}|${targetLang}`;
     try {
         const res = await fetch(url);
@@ -96,7 +95,7 @@ const translate = async (text, sourceLang, targetLang) => {
 
 
 // const translate = async (text, sourceLang, targetLang) => {
-//     console.log('正在尝试翻译:' + text + ',源语言:' + sourceLang + ',目标语言:' + targetLang);
+//     logger('正在尝试翻译:' + text + ',源语言:' + sourceLang + ',目标语言:' + targetLang);
 //     if (sourceLang === targetLang || !text.trim()) return text;
 //     const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
 //     try {
@@ -128,7 +127,7 @@ function ChatRoom() {
         if (savedIndex && !isNaN(parseInt(savedIndex)) && AVATAR_LIST[parseInt(savedIndex)]) {
             return AVATAR_LIST[parseInt(savedIndex)];
         }
-        return AVATAR_LIST[0];
+        return AVATAR_LIST[Math.floor(Math.random() * AVATAR_LIST.length)];
     });
     const [showAvatarPicker, setShowAvatarPicker] = useState(false); // 控制弹窗显隐
 
@@ -155,6 +154,27 @@ function ChatRoom() {
     //房间号默认到url中获取
     const roomId = useRef(urlRoomId);
 
+    // 在 ChatRoom 组件内部顶部添加
+    const [activeTab, setActiveTab] = useState('avatar'); // 'avatar' 或 'nickname'
+    const [myNickname, setMyNickname] = useState(() => {
+        return sessionStorage.getItem('myNickname') || myPeerId; // 默认使用 PeerID
+    });
+    const [tempNickname, setTempNickname] = useState(myNickname); // 弹窗内输入框的临时状态
+
+// 更新昵称的处理函数
+    const updateNickname = () => {
+        // 微信风格正则：支持中英文、数字、下划线、减号，1-20位
+        const regex = /^[\u4e00-\u9fa5a-zA-Z0-9_-]{1,20}$/;
+        if (!regex.test(tempNickname)) {
+            alert("昵称长度为1-20位，支持中文、字母、数字、下划线或减号");
+            return;
+        }
+        setMyNickname(tempNickname);
+        sessionStorage.setItem('myNickname', tempNickname);
+        setShowAvatarPicker(false); // 关闭弹窗
+    };
+
+
     // 3. 更换头像的处理函数
     const changeAvatar = (newAvatar) => {
         // 将头像编号存储到缓存，而不是完整路径
@@ -169,14 +189,15 @@ function ChatRoom() {
 
     //加载历史记录
     const loadHistory = () => {
-        console.log('开始加载历史记录');
+        logger('开始加载历史记录');
+        logger('开始加载历史记录')
         const key = getHistoryKey(roomId.current);
         if (key) {
             const saved = sessionStorage.getItem(key);
             if (saved) {
                 setConnected(true) ;
                 const parsed = JSON.parse(saved);
-                console.log(`加载历史记录 [${key}]:`, parsed.length, "条");
+                logger(`加载历史记录 [${key}]:`, parsed.length, "条");
                 setMessages(parsed);
             } else {
                 setMessages([]);
@@ -200,7 +221,7 @@ function ChatRoom() {
         myLangRef.current = newLang
         setMyLang(newLang);
 
-        console.log('change我的语言：' + newLang);
+        logger('change我的语言：' + newLang);
         sessionStorage.setItem('myLang', newLang);
     };
 
@@ -212,7 +233,7 @@ function ChatRoom() {
 
     useEffect(() => {
         //如果url中没有房间号，就取分享人的peerId即为roomId
-        console.log('我的id：' + myPeerIdRef.current + ',urlRoomId:' + urlRoomId);
+        logger('我的id：' + myPeerIdRef.current + ',urlRoomId:' + urlRoomId);
         if(!urlRoomId){
             roomId.current = myPeerIdRef.current;
         }
@@ -222,10 +243,10 @@ function ChatRoom() {
         wsRef.current = ws;
 
         ws.onopen = () => {
-            console.log('WebSocket 连接成功,当前的房间号:' + roomId.current);
+            logger('WebSocket 连接成功,当前的房间号:' + roomId.current);
             let myLanguage = sessionStorage.getItem('myLang');
             if (myLanguage) {
-                console.log('从缓存中获取我的语言：' + myLanguage);
+                logger('从缓存中获取我的语言：' + myLanguage);
                 setMyLang(myLanguage);
                 myLangRef.current = myLanguage;
             }
@@ -237,16 +258,17 @@ function ChatRoom() {
         ws.onmessage = async (event) => {
             const data = JSON.parse(event.data);
             if (data.type === 'init') {
-                console.log('监听init数据,加载历史记录，保存对方的id:', data.id + ',对方语言:' + data.lang);
+                logger('监听init数据,加载历史记录，保存对方的id:', data.id + ',对方语言:' + data.lang);
                 theirPeerIdRef.current = data.id;
                 theirLangRef.current = data.lang;
                 loadHistory();
                 setConnected(true);
 
             } else if (data.type === 'msg') {
-                console.log('监听msg数据:'+ data.text +',对方的id:'+ data.from +',对方的语言:', data.lang + ',我的语言:' + myLangRef.current);
+                logger('监听msg数据:'+ data.text +',对方的id:'+ data.from +',对方的语言:', data.lang + ',我的语言:' + myLangRef.current);
                 const translated = await translate(data.text, data.lang, myLangRef.current);
-                const newMessage = { text: translated, original: data.text, from: data.from, isMine: false, time: data.time,avatar: data.avatar };
+                const newMessage = { text: translated, original: data.text, from: data.from, isMine: false,
+                                     time: data.time,avatar: data.avatar,nickname: data.nickname };
                 setMessages(prev => {
                     const updated = [...prev, newMessage];
                     const key = getHistoryKey(roomId.current);
@@ -258,7 +280,7 @@ function ChatRoom() {
 
         ws.onclose = () => {
             setConnected(false);
-            console.log('WebSocket 已断开');
+            logger('WebSocket 已断开');
         };
 
         return () => {
@@ -269,25 +291,27 @@ function ChatRoom() {
 
     const send = () => {
         if (message.trim() && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            console.log('发送信息:' + message + ',roomId:' + roomId.current + ',我的语言:' + myLangRef.current);
-            const time = new Date().toLocaleTimeString('zh-CN', {
-                hour12: false,
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit'
-            });
+            logger('发送信息:' + message + ',roomId:' + roomId.current + ',我的语言:' + myLangRef.current);
+            // const time = new Date().toLocaleTimeString('zh-CN', {
+            //     hour12: false,
+            //     hour: '2-digit',
+            //     minute: '2-digit',
+            //     second: '2-digit'
+            // });
+            const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+           // const time = timestamp;
             const msgData = {
                 type: 'msg',
                 from: myPeerIdRef.current,
                 text: message,
                 time: time,
                 lang: myLangRef.current,
-                avatar:AVATAR_LIST.indexOf(myAvatar)
+                avatar:AVATAR_LIST.indexOf(myAvatar),
+                nickname: myNickname
             };
 
             // 发送给服务器，服务器会转发给对方
             wsRef.current.send(JSON.stringify(msgData));
-
 
             const mySendMessage = {text: message, isMine: true,time:  time };
 
@@ -305,31 +329,98 @@ function ChatRoom() {
 
 
     return (<div className="min-h-screen bg-gray-100 flex flex-col">
-        {/* 4. 头像选择弹窗 (Portal 效果) */}
+        {/*/!* 4. 头像选择弹窗 (Portal 效果) *!/*/}
+        {/*{showAvatarPicker && (*/}
+        {/*    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={() => setShowAvatarPicker(false)}>*/}
+        {/*        <div className="bg-white p-6 rounded-2xl shadow-xl max-w-xs w-full" onClick={e => e.stopPropagation()}>*/}
+        {/*            <h3 className="text-lg font-bold mb-4 text-center">选择新头像</h3>*/}
+        {/*            <div className="grid grid-cols-3 gap-4">*/}
+        {/*                {AVATAR_LIST.map((src, idx) => (*/}
+        {/*                    <img*/}
+        {/*                        key={idx}*/}
+        {/*                        src={src}*/}
+        {/*                        alt="avatar-option"*/}
+        {/*                        className={`w-16 h-16 rounded-lg cursor-pointer border-4 transition-all ${myAvatar === src ? 'border-green-500 scale-110' : 'border-transparent hover:border-gray-200'}`}*/}
+        {/*                        onClick={() => changeAvatar(src)}*/}
+        {/*                    />*/}
+        {/*                ))}*/}
+        {/*            </div>*/}
+        {/*            <button*/}
+        {/*                className="w-full mt-6 py-2 bg-gray-100 rounded-lg font-medium"*/}
+        {/*                onClick={() => setShowAvatarPicker(false)}*/}
+        {/*            >*/}
+        {/*                取消*/}
+        {/*            </button>*/}
+        {/*        </div>*/}
+        {/*    </div>*/}
+        {/*)}*/}
         {showAvatarPicker && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={() => setShowAvatarPicker(false)}>
-                <div className="bg-white p-6 rounded-2xl shadow-xl max-w-xs w-full" onClick={e => e.stopPropagation()}>
-                    <h3 className="text-lg font-bold mb-4 text-center">选择新头像</h3>
-                    <div className="grid grid-cols-3 gap-4">
-                        {AVATAR_LIST.map((src, idx) => (
-                            <img
-                                key={idx}
-                                src={src}
-                                alt="avatar-option"
-                                className={`w-16 h-16 rounded-lg cursor-pointer border-4 transition-all ${myAvatar === src ? 'border-green-500 scale-110' : 'border-transparent hover:border-gray-200'}`}
-                                onClick={() => changeAvatar(src)}
-                            />
-                        ))}
+                <div className="bg-white rounded-2xl shadow-xl max-w-xs w-full overflow-hidden" onClick={e => e.stopPropagation()}>
+                    {/* Tab 头部 */}
+                    <div className="flex border-b">
+                        <button
+                            className={`flex-1 py-4 text-sm font-bold ${activeTab === 'avatar' ? 'text-green-600 border-b-2 border-green-600' : 'text-gray-500'}`}
+                            onClick={() => setActiveTab('avatar')}
+                        >
+                            更换头像
+                        </button>
+                        <button
+                            className={`flex-1 py-4 text-sm font-bold ${activeTab === 'nickname' ? 'text-green-600 border-b-2 border-green-600' : 'text-gray-500'}`}
+                            onClick={() => setActiveTab('nickname')}
+                        >
+                            修改昵称
+                        </button>
                     </div>
-                    <button
-                        className="w-full mt-6 py-2 bg-gray-100 rounded-lg font-medium"
-                        onClick={() => setShowAvatarPicker(false)}
-                    >
-                        取消
-                    </button>
+
+                    <div className="p-6">
+                        {activeTab === 'avatar' ? (
+                            /* 头像列表页 */
+                            <div className="grid grid-cols-3 gap-4">
+                                {AVATAR_LIST.map((src, idx) => (
+                                    <img
+                                        key={idx}
+                                        src={src}
+                                        className={`w-16 h-16 rounded-lg cursor-pointer border-4 transition-all ${myAvatar === src ? 'border-green-500 scale-105' : 'border-transparent'}`}
+                                        onClick={() => changeAvatar(src)}
+                                    />
+                                ))}
+                            </div>
+                        ) : (
+                            /* 昵称设置页 */
+                            <div className="flex flex-col">
+                                <input
+                                    type="text"
+                                    value={tempNickname}
+                                    onChange={(e) => setTempNickname(e.target.value)}
+                                    placeholder="请输入昵称"
+                                    className="w-full border-b-2 border-gray-200 focus:border-green-500 outline-none py-2 text-lg mb-6"
+                                    autoFocus
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' ) {
+                                            updateNickname();
+                                        }
+                                    }}
+                                />
+                                <button
+                                    onClick={updateNickname}
+                                    className="w-full bg-green-500 text-white py-3 rounded-xl font-bold hover:bg-green-600 transition-colors"
+
+                                >
+                                    保存修改
+                                </button>
+                            </div>
+                        )}
+
+                        <button className="w-full mt-4 py-2 text-gray-400 text-sm" onClick={() => setShowAvatarPicker(false)}>
+                            取消
+                        </button>
+                    </div>
                 </div>
             </div>
         )}
+
+
         {!connected && !urlRoomId ? (<div className="max-w-lg mx-auto mt-20 p-8 bg-white rounded-2xl shadow-2xl">
             <h1 className="text-2xl font-bold text-center mb-8">TransChat-跨语言沟通</h1>
             <p className="text-center mb-6 text-lg">
@@ -429,11 +520,10 @@ function ChatRoom() {
 
                         {!msg.isMine && (
                             <div className="flex items-start max-w-[85%]">
-                                {/*<img src={theirAvatar} alt="对方" className="w-10 h-10 rounded-md mr-3 mt-5 object-cover" />*/}
                                 <img src={AVATAR_LIST[parseInt(msg.avatar)]} alt="对方" className="w-10 h-10 rounded-md mr-3 mt-5 object-cover" />
                                 <div className="flex flex-col">
                                     {/* PeerID 放在消息上方，颜色淡化 */}
-                                    <span className="text-[11px] text-gray-400 mb-1 ml-0.5">{msg.from}</span>
+                                    <span className="text-[11px] text-gray-400 mb-1 ml-0.5">{msg.nickname || msg.from}</span>
 
                                     {/* 气泡容器 */}
                                     <div className="relative bg-white text-black px-3 py-2.5 rounded-md shadow-sm border border-[#e5e5e5]">
@@ -488,6 +578,7 @@ function ChatRoom() {
                                     onClick={() => setShowAvatarPicker(true)}
                                     title="点击更换头像"
                                 />
+
                             </div>
                         )}
 
