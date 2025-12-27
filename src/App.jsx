@@ -122,12 +122,13 @@ function ChatRoom() {
     const {urlRoomId} = useParams();
     // 2. 初始化我的头像状态 (从缓存读取或默认选第一个)
     const [myAvatar, setMyAvatar] = useState(() => {
-        const savedIndex = sessionStorage.getItem('myAvatar');
+        let savedIndex = sessionStorage.getItem('myAvatar');
         // 如果缓存中存在头像编号且有效，则使用对应头像，否则使用默认头像
-        if (savedIndex && !isNaN(parseInt(savedIndex)) && AVATAR_LIST[parseInt(savedIndex)]) {
-            return AVATAR_LIST[parseInt(savedIndex)];
+        if(!savedIndex){
+            savedIndex = Math.floor(Math.random() * AVATAR_LIST.length);
+            sessionStorage.setItem('myAvatar', savedIndex);
         }
-        return AVATAR_LIST[Math.floor(Math.random() * AVATAR_LIST.length)];
+        return AVATAR_LIST[savedIndex];
     });
 
     const [myLang, setMyLang] = useState('zh');
@@ -168,7 +169,7 @@ function ChatRoom() {
 
 // 2. 处理昵称保存的快捷函数 (回车触发)
     const handleNicknameSubmit = (e) => {
-        if (e.key === 'Enter') {
+        if (!e || !e.key || e.key === 'Enter') {
             const regex = /^[\p{L}\p{N}_-]{1,20}$/u;
             if (!regex.test(tempNickname)) {
                 alert("昵称需为1-20位，支持所有语言文字、数字、下划线或减号");
@@ -404,7 +405,12 @@ function ChatRoom() {
                                                 <svg className="w-4 h-4 text-gray-300 group-hover:text-green-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                                             </div>
                                         ) : (
-                                            <input autoFocus className="w-full border-b-2 border-green-500 outline-none py-1 text-center text-xl font-bold bg-transparent" value={tempNickname} onChange={e => setTempNickname(e.target.value)} onKeyDown={handleNicknameSubmit} onBlur={() => setIsEditingName(false)} />
+                                            <input autoFocus
+                                                   className="w-full border-b-2 border-green-500 outline-none py-1 text-center text-xl font-bold bg-transparent"
+                                                   value={tempNickname}
+                                                   onChange={e => setTempNickname(e.target.value)}
+                                                   onKeyDown={handleNicknameSubmit}
+                                                   onBlur={() => handleNicknameSubmit()}/>
                                         )}
                                         <p className="text-gray-300 text-[11px] mt-4 tracking-widest ">ID: {myPeerId}</p>
                                     </div>
