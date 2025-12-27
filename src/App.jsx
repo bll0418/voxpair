@@ -137,6 +137,9 @@ function ChatRoom() {
     const [messages, setMessages] = useState([]);
     const [connected, setConnected] = useState(false);
     const [isCopied, setIsCopied] = useState(false);
+    // 1. 在 ChatRoom 组件内部，定义心跳和重连的变量（放在 useState 后面）
+    const heartbeatIntervalRef = useRef(null);
+    const reconnectTimerRef = useRef(null);
 
     // 在 ChatRoom 组件内
     const wsRef = useRef(null);
@@ -212,13 +215,13 @@ function ChatRoom() {
 
 
     const copyId = async () => {
-        if (!myPeerIdRef.current)    return;
+        if (!myPeerIdRef.current) return;
         try {
             await navigator.clipboard.writeText(`${import.meta.env.VITE_APP_BASE_URL}/${myPeerIdRef.current}`);
             setIsCopied(true);
             setTimeout(() => setIsCopied(false), 2000);
         } catch (e) {
-            console.error('复制失败',e);
+            console.error('复制失败', e);
         }
     };
 
@@ -233,63 +236,83 @@ function ChatRoom() {
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({behavior: 'smooth'});
-    }, [messages,myLang,urlRoomId]);
+    }, [messages, myLang, urlRoomId]);
 
 
-    useEffect(() => {
-        // 防止重复连接的清理标记
-        let isComponentMounted = true;
-        //如果url中没有房间号，就取分享人的peerId即为roomId
-        logger('我的id：' + myPeerIdRef.current + ',urlRoomId:' + urlRoomId);
-        if(!urlRoomId){
-            roomId.current = myPeerIdRef.current;
+    const connect = () => {
+        // 如果已有连接且正常，则不重复创建
+        if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+            return;
         }
 
-        // 如果已经有连接且是开启状态，先关闭它
-        if (wsRef.current) {
-            wsRef.current.close();
-        }
+        // 清理之前的定时器
+        clearInterval(heartbeatIntervalRef.current);
+        clearTimeout(reconnectTimerRef.current);
 
-        // 2. 建立 WebSocket 连接
+        logger('正在连接 WebSocket, 房间:' + roomId.current);
         const ws = new WebSocket(`wss://chatbackend.asktraceai.com?roomId=${roomId.current}`);
         wsRef.current = ws;
 
-        ws.onopen = () => {
-            // 只有当组件还没卸载时才执行逻辑
-            if (!isComponentMounted) return;
+        //如果url中没有房间号，就取分享人的peerId即为roomId
+        logger('我的id：' + myPeerIdRef.current + ',urlRoomId:' + urlRoomId);
+        if (!urlRoomId) {
+            roomId.current = myPeerIdRef.current;
+        }
 
+        ws.onopen = () => {
             logger('WebSocket 连接成功,当前的房间号:' + roomId.current);
             let myLanguage = sessionStorage.getItem('myLang');
-            if (myLanguage) {
-                logger('从缓存中获取我的语言：' + myLanguage);
+            logger('我的语言:' + myLanguage + ":" + myLangRef.current);
+            //缓存中的语言不为空，且和我的语言不一致，则更新我的语言
+            if (myLanguage && myLanguage !== myLangRef.current) {
+                logger('缓存中获取我的语言：' + myLanguage);
                 setMyLang(myLanguage);
                 myLangRef.current = myLanguage;
             }
             loadHistory();
 
-            // 确保状态为 OPEN 时再发送数据
-            if (ws.readyState === WebSocket.OPEN) {
-                // 连接成功后可以发送一个init消息，向房间里的所有人,告之自己的语言
-                ws.send(JSON.stringify({ type: 'init', id: myPeerIdRef.current,lang: myLangRef.current }));
-            }
+            // 初始化身份
+            logger('发送init消息，向房间里的所有人,告之自己的语言,peerId:' + myPeerIdRef.current + ',myLang:' + myLangRef.current);
+            ws.send(JSON.stringify({
+                type: 'init', id: myPeerIdRef.current, lang: myLangRef.current
+            }));
 
+            // --- 开启心跳：每 50 秒发送一次，防止 Cloudflare 100秒超时 ---
+            heartbeatIntervalRef.current = setInterval(() => {
+                if (ws.readyState === WebSocket.OPEN) {
+                    // 发送最轻量的字符串，维持链路活跃
+                    ws.send(JSON.stringify({type: 'p'}));
+                }
+            }, 90000);
         };
 
         ws.onmessage = async (event) => {
-            if (!isComponentMounted) return;
             const data = JSON.parse(event.data);
+
+            if (data.type === 'p') {
+                logger('收到服务器心跳响应');
+                return;
+            }
+
             if (data.type === 'init') {
-                logger('监听init数据,加载历史记录，保存对方的id:', data.id + ',对方语言:' + data.lang);
                 theirPeerIdRef.current = data.id;
                 theirLangRef.current = data.lang;
                 loadHistory();
                 setConnected(true);
-
+                logger('监听init数据:' + data.id + ',' + data.lang);
             } else if (data.type === 'msg') {
-                logger('监听msg数据:'+ data.text +',对方的id:'+ data.from +',对方的语言:', data.lang + ',我的语言:' + myLangRef.current);
+                logger('监听msg数据:' + data.text + ',对方的id:' + data.from + ',对方的语言:', data.lang + ',我的语言:' + myLangRef.current);
                 const translated = await translate(data.text, data.lang, myLangRef.current);
-                const newMessage = { text: translated, original: data.text, from: data.from, isMine: false,
-                                     time: data.time,avatar: data.avatar,nickname: data.nickname };
+                const newMessage = {
+                    text: translated,
+                    original: data.text,
+                    from: data.from,
+                    lang: data.lang,
+                    isMine: false,
+                    time: data.time,
+                    avatar: data.avatar,
+                    nickname: data.nickname
+                };
                 setMessages(prev => {
                     const updated = [...prev, newMessage];
                     const key = getHistoryKey(roomId.current);
@@ -300,64 +323,75 @@ function ChatRoom() {
         };
 
         ws.onclose = () => {
-            if (isComponentMounted) {
-                setConnected(false);
-                logger('WebSocket 已断开');
-            }
+            setConnected(false);
+            clearInterval(heartbeatIntervalRef.current);
+            logger('连接已断开，尝试自动重连...');
 
-        };
-        ws.onerror = (error) => {
-            logger('WebSocket 发生错误',error);
+            // 断线自动重连逻辑
+            reconnectTimerRef.current = setTimeout(() => {
+                connect();
+            }, 5000); // 5秒后尝试重连
         };
 
-        // 清理函数：在组件卸载或重新执行时执行
+        ws.onerror = (err) => {
+            logger('WebSocket 报错', err);
+            ws.close();
+        };
+    };
+
+    useEffect(() => {
+        connect();
         return () => {
-            isComponentMounted = false;
-            if (wsRef.current) {
-                wsRef.current.close();
-                wsRef.current = null;
-            }
+            clearInterval(heartbeatIntervalRef.current);
+            clearTimeout(reconnectTimerRef.current);
+            if (wsRef.current) wsRef.current.close();
         };
-
     }, [urlRoomId]);
 
 
     const send = () => {
-        if (message.trim() && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            logger('发送信息:' + message + ',roomId:' + roomId.current + ',我的语言:' + myLangRef.current);
-            // const time = new Date().toLocaleTimeString('zh-CN', {
-            //     hour12: false,
-            //     hour: '2-digit',
-            //     minute: '2-digit',
-            //     second: '2-digit'
-            // });
-            const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
-           // const time = timestamp;
-            const msgData = {
-                type: 'msg',
-                from: myPeerIdRef.current,
-                text: message,
-                time: time,
-                lang: myLangRef.current,
-                avatar:AVATAR_LIST.indexOf(myAvatar),
-                nickname: myNickname
-            };
+        if (!message.trim()) return;
 
-            // 发送给服务器，服务器会转发给对方
-            wsRef.current.send(JSON.stringify(msgData));
+        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+            logger('检测到连接已断开，尝试自动重连并发送...');
+            connect();
 
-            const mySendMessage = {text: message, isMine: true,time:  time };
-
-            setMessages(prev => {
-                const updated = [...prev, mySendMessage];
-                const key = getHistoryKey(roomId.current);
-                if (key) sessionStorage.setItem(key, JSON.stringify(updated));
-                // 清空输入框
-                setMessage("");
-                return updated;
-            });
-
+            setTimeout(() => {
+                if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                    send(); // 连接成功后自动重试发送
+                } else {
+                    alert("网络连接失败，请稍后再试");
+                }
+            }, 1000); // 给 1 秒缓冲时间重连
+            return;
         }
+
+        logger('发送信息:' + message + ',roomId:' + roomId.current + ',我的语言:' + myLangRef.current);
+        const time = new Date().toLocaleTimeString('zh-CN', {hour12: false});
+        const msgData = {
+            type: 'msg',
+            from: myPeerIdRef.current,
+            text: message,
+            time: time,
+            lang: myLangRef.current,
+            avatar: AVATAR_LIST.indexOf(myAvatar),
+            nickname: myNickname
+        };
+
+        // 发送给服务器，服务器会转发给对方
+        wsRef.current.send(JSON.stringify(msgData));
+
+        const mySendMessage = {text: message, isMine: true, time: time};
+
+        setMessages(prev => {
+            const updated = [...prev, mySendMessage];
+            const key = getHistoryKey(roomId.current);
+            if (key) sessionStorage.setItem(key, JSON.stringify(updated));
+
+            return updated;
+        });
+
+        setMessage('');
     };
 
 
