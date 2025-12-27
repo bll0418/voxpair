@@ -203,7 +203,6 @@ function ChatRoom() {
         if (key) {
             const saved = sessionStorage.getItem(key);
             if (saved) {
-                setConnected(true) ;
                 const parsed = JSON.parse(saved);
                 logger(`加载历史记录 [${key}]:`, parsed.length, "条");
                 setMessages(parsed);
@@ -281,6 +280,7 @@ function ChatRoom() {
             heartbeatIntervalRef.current = setInterval(() => {
                 if (ws.readyState === WebSocket.OPEN) {
                     // 发送最轻量的字符串，维持链路活跃
+                    logger('发送心跳');
                     ws.send(JSON.stringify({type: 'p'}));
                 }
             }, 90000);
@@ -291,17 +291,19 @@ function ChatRoom() {
 
             if (data.type === 'p') {
                 logger('收到服务器心跳响应');
+                setConnected(true);
                 return;
             }
 
             if (data.type === 'init') {
+                logger('监听init数据:' + data.id + ',' + data.lang);
                 theirPeerIdRef.current = data.id;
                 theirLangRef.current = data.lang;
                 loadHistory();
                 setConnected(true);
-                logger('监听init数据:' + data.id + ',' + data.lang);
             } else if (data.type === 'msg') {
                 logger('监听msg数据:' + data.text + ',对方的id:' + data.from + ',对方的语言:', data.lang + ',我的语言:' + myLangRef.current);
+                setConnected(true);
                 const translated = await translate(data.text, data.lang, myLangRef.current);
                 const newMessage = {
                     text: translated,
