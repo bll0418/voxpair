@@ -184,6 +184,66 @@ function ChatRoom() {
                 logger('收到心跳包');
                 return;
             }
+            if (data.type === 'history_sync') {
+                logger(`收到历史同步，条数: ${data.data.length}`);
+
+                // 1. 获取本地已有的消息 ID 集合，用于去重和判断是否需要翻译
+                const existingIds = new Set(messages.map(m => m.id));
+                const historyKey = getHistoryKey(roomIdRef.current);
+                const cachedData = JSON.parse(localStorage.getItem(historyKey) || '[]');
+                const cacheMap = new Map(cachedData.map(m => [m.id, m]));
+
+                // 2. 准备异步翻译任务
+                const translatedHistory = await Promise.all(data.data.map(async (m) => {
+                    const msgId = m.id;
+                    const isMine = m.sender_id === myPeerId;
+
+                    // 如果本地缓存中已经有了这条 ID 的翻译结果，直接使用
+                    if (cacheMap.has(msgId)) {
+                        return cacheMap.get(msgId);
+                    }
+
+                    // 如果是新消息且不是自己的，且语言不通，则进行翻译
+                    let displayText = m.content;
+                    if (!isMine && m.lang !== myLang) {
+                        displayText = await translate(m.content, m.lang, myLang);
+                    }
+
+                    return {
+                        id: msgId,
+                        text: displayText,          // 译文
+                        original: m.content,        // 原文
+                        from: m.sender_id,
+                        lang: m.lang,
+                        isMine: isMine,
+                        time: new Date(m.created_at).toLocaleTimeString('zh-CN', { hour12: false }),
+                        avatar: m.avatar,
+                        nickname: m.nickname,
+                        created_at: m.created_at
+                    };
+                }));
+
+                // 3. 合并新老数据并去重排序
+                setMessages(prev => {
+                    const combined = [...prev, ...translatedHistory];
+                    const uniqueMap = new Map();
+
+                    combined.forEach(msg => {
+                        // 优先保留带有译文的记录
+                        uniqueMap.set(msg.id, msg);
+                    });
+
+                    const finalMessages = Array.from(uniqueMap.values()).sort((a, b) => a.created_at - b.created_at);
+
+                    // 4. 最后一起写入本地缓存
+                    if (historyKey) {
+                        localStorage.setItem(historyKey, JSON.stringify(finalMessages));
+                    }
+
+                    return finalMessages;
+                });
+                return;
+            }
 
             if (data.type === 'init') {
                 logger('收到init消息,对方peerId:' + data.id + ',lang:' + data.lang);
@@ -193,6 +253,7 @@ function ChatRoom() {
                 setConnected(true);
                 const translated = await translate(data.text, data.lang, myLang);
                 const newMessage = {
+                    id: data.id,
                     text: translated,
                     original: data.text,
                     from: data.from,
@@ -225,6 +286,7 @@ function ChatRoom() {
         };
     }, [connect, urlRoomId]);
 
+
     const send = () => {
         if (!message.trim()) return;
         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
@@ -232,8 +294,10 @@ function ChatRoom() {
             return;
         }
 
+        const msgId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`; // 生成临时ID
         const time = new Date().toLocaleTimeString('zh-CN', {hour12: false});
         const msgData = {
+            id: msgId, // 传给后端作为数据库主键
             type: 'msg',
             from: myPeerId,
             text: message,
@@ -245,13 +309,8 @@ function ChatRoom() {
 
         wsRef.current.send(JSON.stringify(msgData));
 
-        const mySendMessage = {
-            text: message,
-            isMine: true,
-            time: time,
-            avatar: msgData.avatar, // 补全字段确保渲染一致
-            nickname: myNickname
-        };
+        // 本地即时显示
+        const mySendMessage = { ...msgData,  isMine: true  };
 
         setMessages(prev => {
             const updated = [...prev, mySendMessage];
