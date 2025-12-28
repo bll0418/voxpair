@@ -1,59 +1,29 @@
-import React, {useState, useEffect, useRef} from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Routes, Route, useParams } from 'react-router-dom';
 
-// 1. 定义头像列表
 const AVATAR_LIST = [
-    '/assets/avatar/1.jpg',
-    '/assets/avatar/2.jpg',
-    '/assets/avatar/3.jpg',
-    '/assets/avatar/4.jpg',
-    '/assets/avatar/5.jpg',
-    '/assets/avatar/6.jpg',
-    '/assets/avatar/7.jpg',
-    '/assets/avatar/8.jpg',
-    '/assets/avatar/9.jpg',
-    '/assets/avatar/10.jpg',
-    '/assets/avatar/11.jpg',
-    '/assets/avatar/12.jpg',
-    '/assets/avatar/13.jpg',
-    '/assets/avatar/14.jpg',
-    '/assets/avatar/15.jpg',
-    '/assets/avatar/16.jpg',
-    '/assets/avatar/17.jpg',
-    '/assets/avatar/18.jpg'
+    '/assets/avatar/1.jpg', '/assets/avatar/2.jpg', '/assets/avatar/3.jpg', '/assets/avatar/4.jpg',
+    '/assets/avatar/5.jpg', '/assets/avatar/6.jpg', '/assets/avatar/7.jpg', '/assets/avatar/8.jpg',
+    '/assets/avatar/9.jpg', '/assets/avatar/10.jpg', '/assets/avatar/11.jpg', '/assets/avatar/14.jpg',
+    '/assets/avatar/13.jpg', '/assets/avatar/14.jpg', '/assets/avatar/15.jpg', '/assets/avatar/16.jpg',
+    '/assets/avatar/17.jpg', '/assets/avatar/18.jpg'
 ];
 
-const languages = {
-    zh: '中文',
-    en: 'English',
-    fr: 'Français',
-    de: 'Deutsch',
-    ja: '日本語',
-};
-const originalMessageTip = {
-    zh: '原文',
-    en: 'original',
-    fr: 'original',
-    de: 'Deutsch',
-    ja: '原文',
-};
-
+const languages = {zh: '中文', en: 'English', fr: 'Français', de: 'Deutsch', ja: '日本語'};
+const originalMessageTip = {zh: '原文', en: 'original', fr: 'original', de: 'Deutsch', ja: '原文'};
 const inputMessagePlaceholder = {
     zh: '输入消息...',
     en: 'Input message..',
     fr: 'Saisissez votre message...',
     de: 'Geben Sie Ihre Nachricht ein...',
-    ja: 'メッセージを入力してください...',
+    ja: 'メッセージを入力してください...'
 };
 
-
-// 为日志添加时间戳的辅助函数
 const logger = (message) => {
     const timestamp = new Date().toLocaleTimeString('zh-CN', { hour12: false });
     console.log(`[${timestamp}] ${message}`);
 };
 
-//用户id:4位字母 + 3位数字
 const generateUsername = () => {
     const s = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
     const n = "0123456789";
@@ -61,27 +31,20 @@ const generateUsername = () => {
     return r(s, 4) + r(n, 3);
 };
 
-//获取我的id,先从sessionStorage中获取
+//获取我的id,先从localStorage中获取
 const getMyPeerId = () => {
-    let myPeerId = sessionStorage.getItem('myPeerId');
-   //logger('从sessionStorage获取的myPeerId:', myPeerId);
+    let myPeerId = localStorage.getItem('myPeerId');
     if (!myPeerId) {
         myPeerId = generateUsername();
-        sessionStorage.setItem('myPeerId', myPeerId);
-        logger('生成新的myPeerId:', myPeerId);
+        localStorage.setItem('myPeerId', myPeerId);
     }
     return myPeerId;
 };
 
-//获取聊天记录缓存key
-const getHistoryKey = (roomId) => {
-    if (!roomId) return null;
-    return `chat_history_${roomId}`;
-};
+const getHistoryKey = (roomId) => roomId ? `chat_history_${roomId}` : null;
 
 const translate = async (text, sourceLang, targetLang) => {
     if (sourceLang === targetLang || !text.trim()) return text;
-    logger('正在尝试翻译:' + text + ',源语言:' + sourceLang + ',目标语言:' + targetLang);
     const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLang}|${targetLang}`;
     try {
         const res = await fetch(url);
@@ -93,21 +56,6 @@ const translate = async (text, sourceLang, targetLang) => {
     }
 };
 
-
-// const translate = async (text, sourceLang, targetLang) => {
-//     logger('正在尝试翻译:' + text + ',源语言:' + sourceLang + ',目标语言:' + targetLang);
-//     if (sourceLang === targetLang || !text.trim()) return text;
-//     const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
-//     try {
-//         const res = await fetch(url);
-//         const data = await res.json();
-//         return data[0].map(segment => segment[0]).join('');
-//     } catch (e) {
-//         console.error("翻译失败：" + e);
-//         return text + ' (翻译失败)';
-//     }
-// };
-
 export function App() {
     return (
         <Routes>
@@ -117,60 +65,38 @@ export function App() {
     );
 }
 
-
 function ChatRoom() {
-    const {urlRoomId} = useParams();
-    // 2. 初始化我的头像状态 (从缓存读取或默认选第一个)
+    const { urlRoomId } = useParams();
+    const myPeerId = getMyPeerId();
+
+    // 状态定义
     const [myAvatar, setMyAvatar] = useState(() => {
-        let savedIndex = sessionStorage.getItem('myAvatar');
-        // 如果缓存中存在头像编号且有效，则使用对应头像，否则使用默认头像
+        let savedIndex = localStorage.getItem('myAvatar');
         if(!savedIndex){
             savedIndex = Math.floor(Math.random() * AVATAR_LIST.length);
-            sessionStorage.setItem('myAvatar', savedIndex);
+            localStorage.setItem('myAvatar', savedIndex);
         }
         return AVATAR_LIST[savedIndex];
     });
-
-    const [myLang, setMyLang] = useState('zh');
-
+    const [myLang, setMyLang] = useState(() => localStorage.getItem('myLang') || 'zh');
+    const [myNickname, setMyNickname] = useState(() => localStorage.getItem('myNickname') || myPeerId);
     const [message, setMessage] = useState('');
     const [messages, setMessages] = useState([]);
     const [connected, setConnected] = useState(false);
     const [isCopied, setIsCopied] = useState(false);
-    // 1. 在 ChatRoom 组件内部，定义心跳和重连的变量（放在 useState 后面）
-    const heartbeatIntervalRef = useRef(null);
-    const reconnectTimerRef = useRef(null);
-
-    // 在 ChatRoom 组件内
-    const wsRef = useRef(null);
-
-    const messagesEndRef = useRef(null);
-
-    //我的id从缓存获取或自动生成
-    const myPeerId = getMyPeerId();
-    const myPeerIdRef = useRef(myPeerId);
-    const myLangRef = useRef(myLang);
-    //对方的id从url中获取
-    const theirPeerIdRef = useRef(urlRoomId);
-    const theirLangRef = useRef('en');
-
-    //房间号默认到url中获取
-    const roomId = useRef(urlRoomId);
-
-
-    const [myNickname, setMyNickname] = useState(() => {
-        return sessionStorage.getItem('myNickname') || myPeerId; // 默认使用 PeerID
-    });
-
     const [activeView, setActiveView] = useState('main');
     const [isEditingName, setIsEditingName] = useState(false);
     const [tempNickname, setTempNickname] = useState(myNickname);
-    const [showAvatarPicker, setShowAvatarPicker] = useState(false); // 控制弹窗显隐
+    const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+    const [viewingUser, setViewingUser] = useState(null);
 
-    // 在组件顶部添加
-    const [viewingUser, setViewingUser] = useState(null); // 存储 { id, nickname, avatar }
+    // Refs
+    const wsRef = useRef(null);
+    const messagesEndRef = useRef(null);
+    const heartbeatIntervalRef = useRef(null);
+    const reconnectTimerRef = useRef(null);
+    const roomIdRef = useRef(urlRoomId || myPeerId);
 
-// 2. 处理昵称保存的快捷函数 (回车触发)
     const handleNicknameSubmit = (e) => {
         if (!e || !e.key || e.key === 'Enter') {
             const regex = /^[\p{L}\p{N}_-]{1,20}$/u;
@@ -179,7 +105,7 @@ function ChatRoom() {
                 return;
             }
             setMyNickname(tempNickname);
-            sessionStorage.setItem('myNickname', tempNickname);
+            localStorage.setItem('myNickname', tempNickname);
             setIsEditingName(false);
         }
     };
@@ -189,34 +115,16 @@ function ChatRoom() {
         // 将头像编号存储到缓存，而不是完整路径
         const avatarIndex = AVATAR_LIST.indexOf(newAvatar);
         if (avatarIndex !== -1) {
-            sessionStorage.setItem('myAvatar', avatarIndex.toString());
+            localStorage.setItem('myAvatar', avatarIndex.toString());
             setMyAvatar(newAvatar);
             setActiveView('main');
         }
     };
 
-
-    //加载历史记录
-    const loadHistory = () => {
-        const key = getHistoryKey(roomId.current);
-        logger('开始加载历史记录key:' + key);
-        if (key) {
-            const saved = sessionStorage.getItem(key);
-            if (saved) {
-                const parsed = JSON.parse(saved);
-                logger(`加载历史记录 [${key}]:`, parsed.length, "条");
-                setMessages(parsed);
-            } else {
-                setMessages([]);
-            }
-        }
-    };
-
-
     const copyId = async () => {
-        if (!myPeerIdRef.current) return;
+        if (!myPeerId) return;
         try {
-            await navigator.clipboard.writeText(`${import.meta.env.VITE_APP_BASE_URL}/${myPeerIdRef.current}`);
+            await navigator.clipboard.writeText(`${import.meta.env.VITE_APP_BASE_URL}/${myPeerId}`);
             setIsCopied(true);
             setTimeout(() => setIsCopied(false), 2000);
         } catch (e) {
@@ -224,87 +132,66 @@ function ChatRoom() {
         }
     };
 
-    const changeMyLang = async (newLang) => {
-        myLangRef.current = newLang
-        setMyLang(newLang);
 
+    const changeMyLang = async (newLang) => {
+        setMyLang(newLang);
         logger('change我的语言：' + newLang);
-        sessionStorage.setItem('myLang', newLang);
+        localStorage.setItem('myLang', newLang);
     };
 
-
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({behavior: 'smooth'});
-    }, [messages, myLang, urlRoomId]);
+        roomIdRef.current = urlRoomId || myPeerId;
+        const key = getHistoryKey(roomIdRef.current);
+        const saved = localStorage.getItem(key);
+        setMessages(saved ? JSON.parse(saved) : []);
+    }, [urlRoomId, myPeerId]);
 
-
-    const connect = () => {
-        // 如果已有连接且正常，则不重复创建
+    const connect = useCallback(() => {
         if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
             return;
         }
 
-        // 清理之前的定时器
         clearInterval(heartbeatIntervalRef.current);
         clearTimeout(reconnectTimerRef.current);
 
-        logger('正在连接 WebSocket, 房间:' + roomId.current);
-        const ws = new WebSocket(`wss://chatbackend.asktraceai.com?roomId=${roomId.current}`);
+        const ws = new WebSocket(`wss://chatbackend.asktraceai.com?roomId=${roomIdRef.current}`);
         wsRef.current = ws;
 
-        //如果url中没有房间号，就取分享人的peerId即为roomId
-        logger('我的id：' + myPeerIdRef.current + ',urlRoomId:' + urlRoomId);
-        if (!urlRoomId) {
-            roomId.current = myPeerIdRef.current;
-        }
-
         ws.onopen = () => {
-            logger('WebSocket 连接成功,当前的房间号:' + roomId.current);
-            let myLanguage = sessionStorage.getItem('myLang');
-            logger('我的语言:' + myLanguage + ":" + myLangRef.current);
-            //缓存中的语言不为空，且和我的语言不一致，则更新我的语言
-            if (myLanguage && myLanguage !== myLangRef.current) {
-                logger('缓存中获取我的语言：' + myLanguage);
-                setMyLang(myLanguage);
-                myLangRef.current = myLanguage;
+            //通过分享链接或有聊天历史的情况下，自己跳转到房间
+            if(urlRoomId || localStorage.getItem(getHistoryKey(roomIdRef.current)) ){
+                setConnected(true);
             }
-            loadHistory();
 
-            // 初始化身份
-            logger('发送init消息，向房间里的所有人,告之自己的语言,peerId:' + myPeerIdRef.current + ',myLang:' + myLangRef.current);
+            logger('发送init消息，向房间里的所有人,告之自己的语言,myPeerId:' + myPeerId + ',myLang:' + myLang);
             ws.send(JSON.stringify({
-                type: 'init', id: myPeerIdRef.current, lang: myLangRef.current
+                type: 'init',
+                id: myPeerId,
+                lang: myLang
             }));
 
-            // --- 开启心跳：每 50 秒发送一次，防止 Cloudflare 100秒超时 ---
             heartbeatIntervalRef.current = setInterval(() => {
-                if (ws.readyState === WebSocket.OPEN) {
-                    // 发送最轻量的字符串，维持链路活跃
-                    logger('发送心跳');
-                    ws.send(JSON.stringify({type: 'p'}));
+                if (ws.readyState === WebSocket.OPEN){
+                    logger('发送心跳包');
+                    ws.send(JSON.stringify({type: 'p'}))
                 }
-            }, 90000);
+            }, 80000);
         };
 
         ws.onmessage = async (event) => {
             const data = JSON.parse(event.data);
-
-            if (data.type === 'p') {
-                logger('收到服务器心跳响应');
-                setConnected(true);
+            if (data.type === 'p'){
+                logger('收到心跳包');
                 return;
             }
 
             if (data.type === 'init') {
-                logger('监听init数据:' + data.id + ',' + data.lang);
-                theirPeerIdRef.current = data.id;
-                theirLangRef.current = data.lang;
-                loadHistory();
+                logger('收到init消息,对方peerId:' + data.id + ',lang:' + data.lang);
                 setConnected(true);
             } else if (data.type === 'msg') {
-                logger('监听msg数据:' + data.text + ',对方的id:' + data.from + ',对方的语言:', data.lang + ',我的语言:' + myLangRef.current);
+                logger('监听msg数据:' + data.text + ',对方的id:' + data.from + ',对方的语言:', data.lang + ',我的语言:' + myLang);
                 setConnected(true);
-                const translated = await translate(data.text, data.lang, myLangRef.current);
+                const translated = await translate(data.text, data.lang, myLang);
                 const newMessage = {
                     text: translated,
                     original: data.text,
@@ -317,8 +204,7 @@ function ChatRoom() {
                 };
                 setMessages(prev => {
                     const updated = [...prev, newMessage];
-                    const key = getHistoryKey(roomId.current);
-                    if (key) sessionStorage.setItem(key, JSON.stringify(updated));
+                    localStorage.setItem(getHistoryKey(roomIdRef.current), JSON.stringify(updated));
                     return updated;
                 });
             }
@@ -326,20 +212,9 @@ function ChatRoom() {
 
         ws.onclose = () => {
             setConnected(false);
-            clearInterval(heartbeatIntervalRef.current);
-            logger('连接已断开，尝试自动重连...');
-
-            // 断线自动重连逻辑
-            reconnectTimerRef.current = setTimeout(() => {
-                connect();
-            }, 5000); // 5秒后尝试重连
+           // reconnectTimerRef.current = setTimeout(connect, 5000);
         };
-
-        ws.onerror = (err) => {
-            logger('WebSocket 报错', err);
-            ws.close();
-        };
-    };
+    }, [urlRoomId, myPeerId, myLang]); // 依赖 myLang 确保翻译语言正确
 
     useEffect(() => {
         connect();
@@ -348,57 +223,50 @@ function ChatRoom() {
             clearTimeout(reconnectTimerRef.current);
             if (wsRef.current) wsRef.current.close();
         };
-    }, [urlRoomId]);
-
+    }, [connect, urlRoomId]);
 
     const send = () => {
         if (!message.trim()) return;
-
         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-            logger('检测到连接已断开，尝试自动重连并发送...');
             connect();
-
-            setTimeout(() => {
-                if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                    send(); // 连接成功后自动重试发送
-                } else {
-                    alert("网络连接失败，请稍后再试");
-                }
-            }, 1000); // 给 1 秒缓冲时间重连
             return;
         }
 
-        logger('发送信息:' + message + ',roomId:' + roomId.current + ',我的语言:' + myLangRef.current);
         const time = new Date().toLocaleTimeString('zh-CN', {hour12: false});
         const msgData = {
             type: 'msg',
-            from: myPeerIdRef.current,
+            from: myPeerId,
             text: message,
             time: time,
-            lang: myLangRef.current,
+            lang: myLang,
             avatar: AVATAR_LIST.indexOf(myAvatar),
             nickname: myNickname
         };
 
-        // 发送给服务器，服务器会转发给对方
         wsRef.current.send(JSON.stringify(msgData));
 
-        const mySendMessage = {text: message, isMine: true, time: time};
+        const mySendMessage = {
+            text: message,
+            isMine: true,
+            time: time,
+            avatar: msgData.avatar, // 补全字段确保渲染一致
+            nickname: myNickname
+        };
 
         setMessages(prev => {
             const updated = [...prev, mySendMessage];
-            const key = getHistoryKey(roomId.current);
-            if (key) sessionStorage.setItem(key, JSON.stringify(updated));
-
+            localStorage.setItem(getHistoryKey(roomIdRef.current), JSON.stringify(updated));
             return updated;
         });
-
         setMessage('');
     };
 
+    // 滚动到底部
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [messages]);
 
     return (<div className="min-h-screen bg-gray-100 flex flex-col">
-
         {showAvatarPicker && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 transition-opacity"
                  onClick={() => { setShowAvatarPicker(false); setActiveView('main'); setViewingUser(null); }}>
@@ -530,7 +398,7 @@ function ChatRoom() {
         </div>) : (<div className="max-w-2xl w-full mx-auto flex flex-col h-screen bg-gray-100">
 
             <div className="bg-gray-50 px-4 py-3 text-center  border-b border-gray-200  flex items-center justify-between shadow-sm">
-                <h2 className="text-xl font-bold text-black pl-1.5"># {roomId.current}</h2>
+                <h2 className="text-xl font-bold text-black pl-1.5"># {roomIdRef.current}</h2>
                 <div className="relative">
                     <select
                         value={myLang}
