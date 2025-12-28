@@ -196,7 +196,7 @@ function ChatRoom() {
                 // 2. 准备异步翻译任务
                 const translatedHistory = await Promise.all(data.data.map(async (m) => {
                     const msgId = m.id;
-                    const isMine = m.sender_id === myPeerId;
+                    const isMine = m.sender === myPeerId;
 
                     // 如果本地缓存中已经有了这条 ID 的翻译结果，直接使用
                     if (cacheMap.has(msgId)) {
@@ -213,13 +213,13 @@ function ChatRoom() {
                         id: msgId,
                         text: displayText,          // 译文
                         original: m.content,        // 原文
-                        from: m.sender_id,
+                        from: m.sender,
                         lang: m.lang,
                         isMine: isMine,
-                        time: new Date(m.created_at).toLocaleTimeString('zh-CN', { hour12: false }),
+                        time: new Date(m.timestamp).toLocaleTimeString('zh-CN', { hour12: false }),
                         avatar: m.avatar,
                         nickname: m.nickname,
-                        created_at: m.created_at
+                        timestamp: m.timestamp
                     };
                 }));
 
@@ -233,7 +233,7 @@ function ChatRoom() {
                         uniqueMap.set(msg.id, msg);
                     });
 
-                    const finalMessages = Array.from(uniqueMap.values()).sort((a, b) => a.created_at - b.created_at);
+                    const finalMessages = Array.from(uniqueMap.values()).sort((a, b) => a.timestamp - b.timestamp);
 
                     // 4. 最后一起写入本地缓存
                     if (historyKey) {
@@ -294,10 +294,10 @@ function ChatRoom() {
             return;
         }
 
-        const msgId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`; // 生成临时ID
+        const msgId = `${Math.random().toString(36).substring(2, 6)}_${Date.now()}`; // 生成临时ID
         const time = new Date().toLocaleTimeString('zh-CN', {hour12: false});
         const msgData = {
-            id: msgId, // 传给后端作为数据库主键
+            id: msgId,
             type: 'msg',
             from: myPeerId,
             text: message,
